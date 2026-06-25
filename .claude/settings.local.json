@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(node -e ' *)",
+      "Bash(tail -n 40 /tmp/evo-dev.log)",
+      "Read(//private/tmp/**)",
+      "Read(//Users/santiagojacalvarez/evolution-os-verify/**)",
+      "Bash(OPENAI_API_KEY=sk-dummy npm run dev)",
+      "Read(//tmp/**)",
+      "Bash(break)",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(OPENAI_API_KEY=sk-dummy npm run build)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(pkill -f \"next-server\")",
+      "Bash(rm -rf \"/Users/santiagojacalvarez/evolution-os-verify\")"
+    ]
+  }
+}

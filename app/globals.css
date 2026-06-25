@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --font-inter: "Inter";
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-color: #05060f;
+  color: #e2e8f0;
+  /* Futuristic animated background grid + glow */
+  background-image:
+    radial-gradient(circle at 15% 10%, rgba(34, 211, 238, 0.12), transparent 40%),
+    radial-gradient(circle at 85% 90%, rgba(168, 85, 247, 0.12), transparent 40%),
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 38px 38px, 38px 38px;
+  background-attachment: fixed;
+}
+
+/* Glassmorphism panel used across the app */
+@layer components {
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl;
+  }
+  .glow-border {
+    @apply border border-accent/30 shadow-glow;
+  }
+  .gradient-text {
+    @apply bg-gradient-to-r from-accent via-accent2 to-accent3 bg-clip-text text-transparent;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 font-medium
+      bg-gradient-to-r from-accent to-accent2 text-void
+      transition hover:shadow-glow hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2
+      bg-white/5 border border-white/10 text-slate-200
+      transition hover:bg-white/10 hover:border-accent/40;
+  }
+  .input {
+    @apply w-full rounded-xl bg-black/30 border border-white/10 px-4 py-2.5 text-slate-100
+      placeholder:text-slate-500 outline-none transition
+      focus:border-accent/60 focus:ring-2 focus:ring-accent/20;
+  }
+  .card {
+    @apply glass p-5 transition hover:border-accent/30;
+  }
+}
+
+/* Slim custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(34, 211, 238, 0.5);
+}
+
+/* Typing indicator dots */
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #22d3ee;
+  animation: pulseGlow 1.4s ease-in-out infinite;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
