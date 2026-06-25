@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 export async function POST(req: NextRequest) {
-  let body: { messages?: ChatMessage[]; model?: string };
+  let body: { messages?: ChatMessage[]; model?: string; context?: string };
   try {
     body = await req.json();
   } catch {
@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
   }
 
   const messages = body.messages ?? [];
+  const context = (body.context ?? "").trim();
 
   // The key comes from your .env.local file (preferred) OR, as a fallback,
   // from a key you saved on the Settings page (sent in this header).
@@ -37,8 +38,16 @@ export async function POST(req: NextRequest) {
   const systemPrompt: ChatMessage = {
     role: "system",
     content:
-      "You are Evolution OS, a helpful, concise personal AI assistant. " +
-      "Be friendly and clear. Use short paragraphs. When useful, format with markdown.",
+      "You are Evolution OS, a proactive personal AI assistant for a real-estate professional. " +
+      "You help manage leads, property deals, tasks, notes, email, and calendar. " +
+      "Be friendly, concise, and action-oriented. Use short paragraphs and markdown when useful. " +
+      "When the user shares a fact worth remembering long-term (preferences, people, ongoing deals), " +
+      "acknowledge it briefly.\n" +
+      (context
+        ? "\nHere is what you currently know about the user and their business. " +
+          "Use it to give personalized, specific answers:\n\n" +
+          context
+        : ""),
   };
 
   let openaiRes: Response;

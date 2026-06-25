@@ -1,8 +1,26 @@
 # 🧬 Evolution OS
 
-Your personal AI assistant dashboard — chat (with voice in & out), projects,
-notes, tasks, files, and settings. Built with **Next.js + TypeScript + Tailwind**
-and connected to the **OpenAI API**.
+Your personal **real-estate AI assistant** — voice-first chat that knows your
+business, a leads CRM, a property-deal pipeline, long-term memory, Gmail &
+Google Calendar, tasks, notes, and searchable file storage. Built with
+**Next.js + TypeScript + Tailwind**, connected to the **OpenAI API**, and
+optimized for **iPhone** (installable as a home-screen app).
+
+## ✨ What's inside
+| Feature | Where | Notes |
+|---|---|---|
+| 🎙️ Voice-first assistant | **AI Assistant** | Type or talk; tap the wave icon for hands-free conversation. Knows your CRM, deals, tasks & notes. |
+| 🧠 Long-term memory | **Memory** | Facts you save are auto-injected into every chat. |
+| 👥 CRM for leads | **CRM · Leads** | Buyers/sellers/investors with status, budget, source; tap-to-call/text/email. |
+| 🏠 Property pipeline | **Pipeline** | Kanban of deals from lead → close, with pipeline value & commission totals. |
+| ✅ Tasks · 📝 Notes | **Tasks / Notes** | Quick capture with priorities. |
+| ✉️ Gmail · 📅 Calendar | **Gmail / Calendar** | Read & send mail, view & create events (needs Google setup — see below). |
+| 📁 File search & upload | **Files** | Drag-drop, tag, and search files stored in your browser. |
+| 📱 Mobile / iPhone | everywhere | Bottom tab bar, safe-area aware, add to Home Screen. |
+
+> Your CRM, deals, tasks, notes, memory, and files are stored locally in your
+> browser. Nothing is uploaded to a server (Gmail/Calendar are accessed live
+> via secure server-side tokens).
 
 ---
 
@@ -46,6 +64,18 @@ That's it — go to **AI Chat** and start talking. 🎉
 - **Hear replies:** voice replies are on by default (toggle in the top-right of chat).
 - Voice uses your browser's built-in speech engine — works best in **Chrome**,
   and your browser will ask permission to use the microphone the first time.
+
+## ✉️ Optional: connect Gmail & Calendar
+Everything except the Gmail and Calendar pages works without this.
+1. Go to the [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials).
+2. Create an **OAuth client ID → Web application**, and enable the **Gmail API** + **Google Calendar API**.
+3. Add the redirect URI: `http://localhost:3000/api/google/callback`
+4. Put the client ID & secret in `.env.local` (see `.env.local.example`), then restart `npm run dev`.
+5. Open **Settings → Google** and click **Connect Google account**.
+
+## 📱 Install on your iPhone
+Open the site in **Safari** → tap **Share** → **Add to Home Screen**. It launches
+full-screen like a native app, with a bottom tab bar for one-thumb navigation.
 
 ## 🔑 Two ways to provide the key
 - **Recommended:** `.env.local` file (step 2 above).

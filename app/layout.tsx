@@ -1,10 +1,24 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
+import MobileNav from "@/components/MobileNav";
 
 export const metadata: Metadata = {
   title: "Evolution OS",
-  description: "Your personal AI assistant dashboard.",
+  description: "Your personal real-estate AI assistant.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Evolution OS",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#05060f",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -31,11 +45,13 @@ export default function RootLayout({
       <body className="min-h-screen font-sans antialiased">
         <div className="flex min-h-screen">
           <Sidebar />
-          {/* Main content area — left margin clears the fixed sidebar on desktop */}
-          <main className="flex-1 lg:ml-64 px-4 pb-8 pt-20 lg:pt-8 lg:px-8">
+          {/* Main content area — left margin clears the fixed sidebar on desktop;
+              extra bottom padding on mobile clears the bottom tab bar. */}
+          <main className="flex-1 lg:ml-64 px-4 pb-28 pt-20 lg:pt-8 lg:pb-8 lg:px-8">
             {children}
           </main>
         </div>
+        <MobileNav />
       </body>
     </html>
   );

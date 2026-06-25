@@ -64,12 +64,19 @@ export function useSpeechRecognition(onResult: (text: string) => void) {
  * Voice OUTPUT — uses the browser's built-in Speech Synthesis to
  * read the assistant's replies out loud. Also free, no API key.
  */
-export function speak(text: string) {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
+export function speak(text: string, onEnd?: () => void) {
+  if (typeof window === "undefined" || !window.speechSynthesis) {
+    onEnd?.();
+    return;
+  }
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(stripMarkdown(text));
   utterance.rate = 1;
   utterance.pitch = 1;
+  if (onEnd) {
+    utterance.onend = onEnd;
+    utterance.onerror = onEnd;
+  }
   window.speechSynthesis.speak(utterance);
 }
 

@@ -83,4 +83,86 @@ export type StoredFile = {
   size: number;
   dataUrl: string; // base64 content, stored locally
   createdAt: number;
+  tags?: string;
 };
+
+// ---- Real-estate CRM: a lead / contact ----
+export type LeadStatus =
+  | "new"
+  | "contacted"
+  | "qualified"
+  | "nurturing"
+  | "client"
+  | "closed"
+  | "lost";
+
+export type Contact = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  type: "buyer" | "seller" | "investor" | "renter" | "other";
+  status: LeadStatus;
+  source: string; // e.g. Zillow, referral, open house
+  budget: number; // 0 = unknown
+  notes: string;
+  lastTouch: number; // timestamp of last interaction
+  createdAt: number;
+};
+
+// ---- Property pipeline: a deal moving through stages ----
+export type DealStage =
+  | "lead"
+  | "showing"
+  | "offer"
+  | "under_contract"
+  | "closed"
+  | "lost";
+
+export type Deal = {
+  id: string;
+  address: string;
+  price: number;
+  side: "buy" | "sell";
+  stage: DealStage;
+  contactId: string | null; // linked CRM contact
+  commission: number; // expected $
+  closeDate: string; // ISO date string, optional
+  notes: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+// ---- Long-term memory: facts the assistant should always know ----
+export type Memory = {
+  id: string;
+  text: string;
+  category: "personal" | "business" | "preference" | "fact" | "other";
+  pinned: boolean;
+  createdAt: number;
+};
+
+/** Format a number as USD with no cents. */
+export function formatMoney(n: number): string {
+  if (!n) return "—";
+  return n.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
+}
+
+/** Short relative time, e.g. "3d ago". */
+export function timeAgo(ts: number): string {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d ago`;
+  const mo = Math.floor(d / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  return `${Math.floor(mo / 12)}y ago`;
+}

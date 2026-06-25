@@ -54,6 +54,22 @@ body {
   .card {
     @apply glass p-5 transition hover:border-accent/30;
   }
+  .row {
+    @apply flex items-center justify-between gap-3 rounded-xl px-3 py-2.5
+      bg-white/5 hover:bg-white/10 border border-white/10 hover:border-accent/30 transition;
+  }
+}
+
+/* iPhone safe-area helpers (notch + home indicator) */
+.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.pb-safe { padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem); }
+
+/* Hide number-input spinners for a cleaner look */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 /* Slim custom scrollbar */

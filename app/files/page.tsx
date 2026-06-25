@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/PageHeader";
 import { useLocalStorage, uid, formatDate, type StoredFile } from "@/lib/store";
 
@@ -9,7 +9,16 @@ const MAX_BYTES = 2 * 1024 * 1024; // 2 MB — localStorage is small, keep files
 export default function FilesPage() {
   const [files, setFiles, loaded] = useLocalStorage<StoredFile[]>("evo.files", []);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return files;
+    return files.filter((f) =>
+      [f.name, f.type, f.tags || ""].join(" ").toLowerCase().includes(q)
+    );
+  }, [files, query]);
 
   function onPick(list: FileList | null) {
     if (!list) return;
@@ -36,10 +45,15 @@ export default function FilesPage() {
   }
 
   const remove = (id: string) => setFiles(files.filter((f) => f.id !== id));
+  const setTags = (id: string, tags: string) =>
+    setFiles(files.map((f) => (f.id === id ? { ...f, tags } : f)));
 
   return (
     <div className="max-w-5xl mx-auto">
-      <PageHeader title="Files" subtitle="Store files locally in your browser." />
+      <PageHeader
+        title="Files"
+        subtitle={`${files.length} stored locally · searchable`}
+      />
 
       <div
         onDragOver={(e) => e.preventDefault()}
@@ -70,14 +84,28 @@ export default function FilesPage() {
         </div>
       )}
 
+      {files.length > 0 && (
+        <input
+          className="input mb-4"
+          placeholder="Search files by name, type, or tag…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      )}
+
       {loaded && files.length === 0 && (
         <div className="glass p-10 text-center text-slate-500">
           No files stored yet.
         </div>
       )}
+      {loaded && files.length > 0 && visible.length === 0 && (
+        <div className="glass p-10 text-center text-slate-500">
+          No files match &ldquo;{query}&rdquo;.
+        </div>
+      )}
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {files.map((f) => (
+        {visible.map((f) => (
           <div key={f.id} className="card flex flex-col">
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-3 min-w-0">
@@ -106,10 +134,16 @@ export default function FilesPage() {
                 className="mt-3 rounded-lg max-h-32 object-cover w-full"
               />
             )}
+            <input
+              className="input mt-3 !py-1.5 text-xs"
+              placeholder="Add tags (comma separated)…"
+              value={f.tags || ""}
+              onChange={(e) => setTags(f.id, e.target.value)}
+            />
             <a
               href={f.dataUrl}
               download={f.name}
-              className="btn-ghost mt-3 text-sm justify-center"
+              className="btn-ghost mt-2 text-sm justify-center"
             >
               Download
             </a>

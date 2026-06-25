@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import PageHeader from "@/components/PageHeader";
 import { speak } from "@/lib/voice";
+import GoogleSettings from "@/components/GoogleSettings";
 
 const MODELS = [
   { id: "gpt-4o-mini", label: "GPT-4o mini — fast & cheap (recommended)" },
@@ -135,12 +136,19 @@ export default function SettingsPage() {
         )}
       </div>
 
+      {/* Google integration */}
+      <div className="mt-4">
+        <GoogleSettings />
+      </div>
+
       <div className="glass p-6 mt-4 text-sm text-slate-400 space-y-2">
         <h3 className="text-white font-semibold">About your data</h3>
         <p>
-          Projects, notes, tasks, and files are stored locally in your browser
-          (localStorage) — nothing is uploaded to a server. Clearing your
-          browser data will erase them.
+          Your CRM leads, deals, tasks, notes, memory, and files are stored
+          locally in your browser (localStorage) — nothing is uploaded to a
+          server. Google email &amp; calendar are accessed live via secure,
+          server-side tokens. Clearing your browser data will erase the local
+          items.
         </p>
       </div>
     </div>
