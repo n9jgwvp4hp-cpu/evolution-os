@@ -1,4 +1,4 @@
-import { mutate, getMission, listMissions, uid, dbBackend } from "@/lib/server/db";
+import { mutate, getMission, listMissions, uid, dbBackend, setWorkerHeartbeat } from "@/lib/server/db";
 import { getServerTool, serverToolSchemas } from "@/lib/server/tools";
 import { buildBrainContext } from "@/lib/server/data";
 import type { Mission, MissionStep, MissionApiMsg } from "@/lib/missionTypes";
@@ -377,8 +377,14 @@ export function startWorker() {
       .finally(() => inflight.delete(id));
   };
 
+  let lastBeat = 0;
   const tick = async () => {
     try {
+      // Throttled liveness beat so /api/health can confirm the runtime is alive.
+      if (Date.now() - lastBeat > 15_000) {
+        lastBeat = Date.now();
+        await setWorkerHeartbeat().catch(() => {});
+      }
       const missions = await listMissions();
       // Newly queued work, plus any mission left "running" that isn't currently
       // being worked in this process — i.e. resume immediately after a restart.

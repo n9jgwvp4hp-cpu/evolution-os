@@ -6,17 +6,20 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "worker": "tsx worker.ts",
     "lint": "next lint"
   },
   "engines": {
     "node": ">=20 <23"
   },
   "dependencies": {
+    "dotenv": "^17.4.2",
     "eslint-config-next": "^14.2.35",
     "next": "^14.2.35",
     "pg": "^8.22.0",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "tsx": "^4.22.4"
   },
   "devDependencies": {
     "@types/node": "20.14.10",

@@ -35,6 +35,7 @@ export type Shape = {
   contacts: Contact[];
   deals: Deal[];
   google: GoogleTokens | null;
+  workerHeartbeat: number | null; // last time the mission worker ticked
 };
 
 const empty: Shape = {
@@ -45,6 +46,7 @@ const empty: Shape = {
   contacts: [],
   deals: [],
   google: null,
+  workerHeartbeat: null,
 };
 const merge = (state: any): Shape => ({ ...empty, ...(state || {}) });
 
@@ -170,4 +172,14 @@ export async function getMission(id: string) {
 }
 export async function listMissions() {
   return read((db) => [...db.missions].sort((a, b) => b.createdAt - a.createdAt));
+}
+
+/* ---- worker liveness (observability for the always-on runtime) ---- */
+export async function setWorkerHeartbeat() {
+  await mutate((db) => {
+    db.workerHeartbeat = Date.now();
+  });
+}
+export async function getWorkerHeartbeat() {
+  return read((db) => db.workerHeartbeat ?? null);
 }
