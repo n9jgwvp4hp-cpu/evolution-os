@@ -18,6 +18,15 @@ import type { Task, Contact, Deal, Note, Memory } from "@/lib/types";
  * unchanged regardless of backend.
  */
 
+// OAuth tokens persisted server-side so the mission worker can act as the user
+// (Gmail / Calendar) without a browser session.
+export type GoogleTokens = {
+  access_token: string;
+  refresh_token?: string;
+  expiry: number;
+  email?: string;
+};
+
 export type Shape = {
   missions: Mission[];
   memories: Memory[];
@@ -25,9 +34,18 @@ export type Shape = {
   tasks: Task[];
   contacts: Contact[];
   deals: Deal[];
+  google: GoogleTokens | null;
 };
 
-const empty: Shape = { missions: [], memories: [], notes: [], tasks: [], contacts: [], deals: [] };
+const empty: Shape = {
+  missions: [],
+  memories: [],
+  notes: [],
+  tasks: [],
+  contacts: [],
+  deals: [],
+  google: null,
+};
 const merge = (state: any): Shape => ({ ...empty, ...(state || {}) });
 
 const DATABASE_URL = process.env.DATABASE_URL || "";

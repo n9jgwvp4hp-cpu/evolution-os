@@ -100,17 +100,63 @@ async function callModel(messages: MissionApiMsg[], opts: { tools?: boolean; jso
 
 const MISSION_SYSTEM = (context: string) =>
   "You are Evolution OS executing a long-running MISSION autonomously on the server. " +
-  "The user is not watching — make reasonable assumptions instead of asking questions. " +
+  "The user delegated this objective and walked away — they are NOT watching and cannot answer " +
+  "questions or approve anything. The objective is your authorization: take the actions it implies " +
+  "(send the email, create the event, read the page) directly, without asking. " +
+  "Make reasonable assumptions and finish the work.\n" +
   "Work step by step using the available capabilities until the objective is fully accomplished. " +
-  "Each assistant message before you finish should be one short progress line. " +
-  "CRITICAL: only claim what you actually did with real capabilities. If part of the objective " +
-  "cannot truly be done (no capability for it), say so plainly in your report — never fabricate " +
-  "results, research, or actions. When fully done, send a final message with NO tool calls: a " +
-  "concise, honest report of what you accomplished and any result the user needs.\n" +
+  "Each assistant message before you finish is one short progress line.\n" +
+  "Do NOT repeat an action you've already completed — check the tool results in the conversation " +
+  "before acting (e.g. never send the same email twice).\n" +
+  "CRITICAL honesty: only claim what you actually did. If a capability failed or isn't available " +
+  "(e.g. Google not connected), say so plainly — never fabricate results, research, or actions.\n" +
+  "When fully done, send a final message with NO tool calls: a concise report of what you " +
+  "accomplished, listing any externally-visible actions you took (emails sent, events created) and " +
+  "any result the user needs.\n" +
   (context ? "\nWhat Evolution already knows:\n" + context : "");
 
 function parseArgs(call: any) {
   try { return JSON.parse(call.function?.arguments || "{}"); } catch { return {}; }
+}
+
+/** Stable signature for a tool call, so identical actions can be deduped. */
+function callSignature(name: string, args: any): string {
+  const stable = (v: any): any =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.keys(v).sort().reduce((o: any, k) => ((o[k] = stable(v[k])), o), {})
+      : v;
+  return name + ":" + JSON.stringify(stable(args));
+}
+
+/**
+ * Idempotency guard. If an identical call already executed successfully earlier
+ * in this mission (e.g. a QC revision re-tried it), return true so we DON'T run
+ * it again — this is what stops duplicate emails / duplicate writes.
+ */
+async function alreadyExecuted(id: string, name: string, args: any): Promise<boolean> {
+  const sig = callSignature(name, args);
+  const m = await getMission(id);
+  if (!m) return false;
+  const okById: Record<string, boolean> = {};
+  for (const msg of m.api) {
+    if (msg.role === "tool" && msg.tool_call_id) {
+      try { okById[msg.tool_call_id] = JSON.parse(msg.content || "{}")?.ok !== false; }
+      catch { okById[msg.tool_call_id] = true; }
+    }
+  }
+  for (const msg of m.api) {
+    if (msg.role !== "assistant" || !msg.tool_calls) continue;
+    for (const c of msg.tool_calls) {
+      if (
+        c.function?.name === name &&
+        callSignature(name, parseArgs(c)) === sig &&
+        okById[c.id]
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 async function executeCall(id: string, call: any, approved: boolean) {
@@ -124,6 +170,10 @@ async function executeCall(id: string, call: any, approved: boolean) {
   } else if (!tool) {
     result = { ok: false, error: `Capability "${name}" is not available in background missions yet.` };
     await addStep(id, { kind: "error", text: `Unavailable capability: ${name}` });
+  } else if (await alreadyExecuted(id, name, args)) {
+    // Same action already done — never repeat a side effect.
+    result = { ok: true, skipped: true, note: "Already completed earlier in this mission." };
+    await addStep(id, { kind: "action", text: `${tool.summarize(args)} (already done)` });
   } else {
     try {
       result = await tool.execute(args);
@@ -206,8 +256,11 @@ async function finalize(id: string, candidate: string) {
         role: "user",
         content:
           `Quality control review: the objective is NOT yet fully met. Issues: ${issues}. ` +
-          `${verdict.guidance || ""} Address these now using real capabilities, then report again. ` +
-          `If something genuinely cannot be done, state that plainly instead of claiming it was done.`,
+          `${verdict.guidance || ""} ` +
+          `Only take a NEW action if one is genuinely still missing — do not repeat work already done ` +
+          `(the tool results above show what is complete). If the gap is only in how you described it, ` +
+          `just rewrite the final report accurately. If something truly cannot be done, state that ` +
+          `plainly instead of claiming it was done.`,
       });
       await runMission(id); // keep working
       return;

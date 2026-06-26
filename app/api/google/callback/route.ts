@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeCode, writeTokens } from "@/lib/google";
+import { saveGoogleTokens } from "@/lib/server/google";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +20,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const tokens = await exchangeCode(code);
-    writeTokens(tokens);
+    writeTokens(tokens); // cookie — Conversation Mode
+    await saveGoogleTokens(tokens); // brain — lets background missions act too
     return NextResponse.redirect(`${origin}/settings?google=connected`);
   } catch {
     return NextResponse.redirect(`${origin}/settings?google=failed`);

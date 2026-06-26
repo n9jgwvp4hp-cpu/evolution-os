@@ -116,6 +116,113 @@ export const SERVER_TOOLS: ServerTool[] = [
     summarize: (a) => `Search: “${a.query}”`,
     execute: data.searchData,
   },
+
+  // ---- Outward-facing capabilities: real, completed outcomes ----
+  {
+    name: "fetch_url",
+    description:
+      "Fetch the readable text of a web page by its URL. Use to read an article, listing, or page the objective references, then work from its contents.",
+    parameters: obj({ url: str("Full URL, including https://") }, ["url"]),
+    summarize: (a) => `Read ${a.url}`,
+    async execute(a) {
+      const url = String(a.url || "");
+      if (!/^https?:\/\//i.test(url)) return { ok: false, error: "Invalid URL." };
+      try {
+        const res = await fetch(url, {
+          headers: { "User-Agent": "EvolutionOS/1.0 (+mission)" },
+          redirect: "follow",
+        });
+        if (!res.ok) return { ok: false, error: `Fetch failed (${res.status}).` };
+        const html = await res.text();
+        const text = html
+          .replace(/<script[\s\S]*?<\/script>/gi, " ")
+          .replace(/<style[\s\S]*?<\/style>/gi, " ")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&[a-z]+;/gi, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        return { ok: true, url, text: text.slice(0, 6000) };
+      } catch (e: any) {
+        return { ok: false, error: e?.message || "Could not reach the URL." };
+      }
+    },
+  },
+  {
+    name: "send_email",
+    description:
+      "Send an email as the user via their connected Gmail. Use to deliver results, summaries, or messages the objective asks for. The objective is your authorization — do not ask first.",
+    parameters: obj({ to: str("Recipient email"), subject: str("Subject"), body: str("Email body") }, ["to", "body"]),
+    summarize: (a) => `Email ${a.to}${a.subject ? ` — “${a.subject}”` : ""}`,
+    async execute(a) {
+      const { getServerAccessToken } = await import("@/lib/server/google");
+      let token: string;
+      try {
+        token = await getServerAccessToken();
+      } catch {
+        return { ok: false, error: "Google isn't connected, so I couldn't send the email. The user can connect it in Settings." };
+      }
+      const raw =
+        `To: ${a.to}\r\nSubject: ${a.subject || "(no subject)"}\r\n` +
+        `Content-Type: text/plain; charset=utf-8\r\n\r\n${a.body || ""}`;
+      const encoded = Buffer.from(raw).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      try {
+        const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ raw: encoded }),
+        });
+        if (!res.ok) return { ok: false, error: "Gmail send failed: " + (await res.text()).slice(0, 200) };
+        return { ok: true, emailedTo: a.to };
+      } catch (e: any) {
+        return { ok: false, error: e?.message || "Send failed." };
+      }
+    },
+  },
+  {
+    name: "create_calendar_event",
+    description:
+      "Create an event on the user's connected Google Calendar. The objective is your authorization.",
+    parameters: obj(
+      {
+        summary: str("Event title"),
+        start: str("Start time, ISO 8601 (e.g. 2026-06-27T15:00:00)"),
+        end: str("End time, ISO 8601. Optional — defaults to 1 hour."),
+        location: str("Location, optional"),
+        description: str("Description, optional"),
+      },
+      ["summary", "start"]
+    ),
+    summarize: (a) => `Create event “${a.summary}” at ${a.start}`,
+    async execute(a) {
+      const { getServerAccessToken } = await import("@/lib/server/google");
+      let token: string;
+      try {
+        token = await getServerAccessToken();
+      } catch {
+        return { ok: false, error: "Google isn't connected, so I couldn't create the event. The user can connect it in Settings." };
+      }
+      const startDate = new Date(a.start);
+      const endDate = a.end ? new Date(a.end) : new Date(startDate.getTime() + 60 * 60 * 1000);
+      try {
+        const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            summary: a.summary,
+            location: a.location || undefined,
+            description: a.description || undefined,
+            start: { dateTime: startDate.toISOString() },
+            end: { dateTime: endDate.toISOString() },
+          }),
+        });
+        if (!res.ok) return { ok: false, error: "Calendar create failed: " + (await res.text()).slice(0, 200) };
+        const ev = await res.json();
+        return { ok: true, eventCreated: a.summary, link: ev.htmlLink };
+      } catch (e: any) {
+        return { ok: false, error: e?.message || "Create failed." };
+      }
+    },
+  },
 ];
 
 export function getServerTool(name: string) {
