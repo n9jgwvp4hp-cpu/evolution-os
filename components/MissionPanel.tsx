@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Mission } from "@/lib/missions";
+import type { MissionView as Mission } from "@/lib/missionTypes";
 
 /**
  * Live view of background missions, shown inline at the top of the

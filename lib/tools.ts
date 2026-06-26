@@ -392,15 +392,20 @@ export const TOOLS: Tool[] = [
     ),
     summarize: (a) => `Start mission: ${a.objective}`,
     async execute(a) {
-      const { createMission } = await import("@/lib/missions");
-      const { runMission } = await import("@/lib/missionRunner");
-      const m = createMission(String(a.objective));
-      void runMission(m.id); // fire-and-forget; runs in the background
+      // Hand the objective to the backend. It executes persistently on the
+      // server and keeps running even if the app is closed.
+      const res = await fetch("/api/missions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ objective: String(a.objective) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data.error || "Could not start mission." };
       return {
         ok: true,
         started: true,
-        missionId: m.id,
-        note: "Mission running in the background. The user will see live progress and be notified on completion.",
+        missionId: data.id,
+        note: "Mission queued on the server. It runs in the background; the user can leave and the result will be waiting.",
       };
     },
   },

@@ -5,8 +5,7 @@ import { uid } from "@/lib/store";
 import { buildAssistantContext } from "@/lib/context";
 import { getTool, toolSchemas } from "@/lib/tools";
 import { useSpeechRecognition, speak, stopSpeaking } from "@/lib/voice";
-import { useMissions, removeMission } from "@/lib/missions";
-import { resolveMissionApproval, resumeInterruptedMissions } from "@/lib/missionRunner";
+import { useServerMissions, approveMission } from "@/lib/missionsClient";
 import MissionPanel from "@/components/MissionPanel";
 
 function notify(title: string, body: string) {
@@ -58,8 +57,10 @@ export default function EvolutionOS() {
   const apiRef = useRef<ApiMsg[]>([]);
   const approvals = useRef<Record<string, (ok: boolean) => void>>({});
 
-  // Background missions
-  const missions = useMissions();
+  // Background missions (executed + persisted on the server; we just watch)
+  const allMissions = useServerMissions();
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const missions = allMissions.filter((m) => !dismissed.includes(m.id));
   const missionStatus = useRef<Record<string, string>>({});
   const seeded = useRef(false);
 
@@ -116,13 +117,13 @@ export default function EvolutionOS() {
   const patch = (id: string, p: Partial<Item>) =>
     setItems((prev) => prev.map((it) => (it.id === id ? ({ ...it, ...p } as Item) : it)));
 
-  // Mission lifecycle: report back when one finishes; resume on load.
+  // Mission lifecycle: report back in chat when one finishes.
+  // (Execution + resume happen on the server; the client only reflects state.)
   useEffect(() => {
     if (!loaded) return;
     if (!seeded.current) {
       for (const m of missions) missionStatus.current[m.id] = m.status;
       seeded.current = true;
-      resumeInterruptedMissions(missions);
       return;
     }
     for (const m of missions) {
@@ -297,8 +298,8 @@ export default function EvolutionOS() {
         <div className="max-w-2xl mx-auto px-4 py-5">
           <MissionPanel
             missions={missions}
-            onApprove={resolveMissionApproval}
-            onDismiss={removeMission}
+            onApprove={approveMission}
+            onDismiss={(id) => setDismissed((d) => [...d, id])}
           />
           {empty ? (
             <Hero

@@ -27,11 +27,31 @@ pause for a one-tap approval.
 - **Conversation Mode** — immediate responses, questions, guidance, and single
   actions. You speak, it answers or does the one thing, right now.
 - **Mission Mode** — for a big or multi-step objective ("research X, summarize
-  it, and email it to me"), Evolution starts a **mission** that runs in the
-  background: it plans, works step by step, shows live progress, pauses for
-  approval when needed, and **notifies you when it's done** (in-app, spoken, and
-  a system notification). You can keep talking while it works. Missions survive
-  a reload and resume automatically.
+  it, and save it"), Evolution starts a **mission** that runs on the server in
+  the background: it plans, works step by step, **checks its own work** before
+  reporting, pauses for approval when needed, and reports back when done.
+
+## Persistent execution (the OS part)
+Missions don't live in the browser — they run on the **backend** and persist:
+
+- **Open phone → speak → leave → return later → results waiting.**
+- A mission keeps running when the app is closed, when you leave, and when your
+  phone is offline — execution happens on the server, not the page.
+- Progress, results, and memory are stored on disk and **survive restarts**; a
+  mission interrupted by a restart resumes automatically.
+- Before reporting, a **quality-control pass** verifies the result against what
+  was actually done and sends it back to revise if a claim isn't supported —
+  Evolution won't tell you it did something it didn't.
+
+Architecture: a file-backed store (`lib/server/db.ts`, swappable for Postgres),
+a server tool layer (`lib/server/tools.ts`), the mission engine
+(`lib/server/missionEngine.ts`), and a worker started on boot
+(`instrumentation.ts`). The client only watches via `/api/missions`.
+
+> **Not yet wired (next milestones, need a hosting/permission decision):**
+> deploying to an always-on host for true 24/7 execution, and push
+> notifications to a closed app. Today, results are waiting the moment you
+> return while the server is running.
 
 New capability domains — email, contacts, calendar, files, AI image & video
 generation, social media, research, real-estate analysis, business operations —
