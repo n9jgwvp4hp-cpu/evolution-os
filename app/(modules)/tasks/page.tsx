@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import PageHeader from "@/components/PageHeader";
-import { useLocalStorage, uid, type Task } from "@/lib/store";
+import { uid, type Task } from "@/lib/store";
+import { useCollection } from "@/lib/collection";
 
 const PRIORITY: Record<Task["priority"], string> = {
   low: "text-slate-400 border-slate-500/30",
@@ -11,7 +12,7 @@ const PRIORITY: Record<Task["priority"], string> = {
 };
 
 export default function TasksPage() {
-  const [tasks, setTasks, loaded] = useLocalStorage<Task[]>("evo.tasks", []);
+  const [tasks, setTasks, loaded] = useCollection<Task>("tasks", []);
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState<Task["priority"]>("medium");
   const [filter, setFilter] = useState<"all" | "open" | "done">("all");

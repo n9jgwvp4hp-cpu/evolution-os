@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import type { Mission } from "@/lib/missionTypes";
+import type { Task, Contact, Deal, Note, Memory } from "@/lib/types";
 
 /**
  * Evolution OS persistence — the server's durable source of truth.
@@ -15,23 +16,18 @@ import type { Mission } from "@/lib/missionTypes";
  * Evolution is deployed for 24/7 always-on execution.
  */
 
-export type ServerMemory = {
-  id: string;
-  text: string;
-  category: string;
-  createdAt: number;
-};
-
 export type Shape = {
   missions: Mission[];
-  memories: ServerMemory[];
-  notes: { id: string; title: string; body: string; createdAt: number }[];
-  tasks: { id: string; title: string; done: boolean; priority: string; createdAt: number }[];
+  memories: Memory[];
+  notes: Note[];
+  tasks: Task[];
+  contacts: Contact[];
+  deals: Deal[];
 };
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const FILE = path.join(DATA_DIR, "evolution.json");
-const empty: Shape = { missions: [], memories: [], notes: [], tasks: [] };
+const empty: Shape = { missions: [], memories: [], notes: [], tasks: [], contacts: [], deals: [] };
 
 let writeChain: Promise<void> = Promise.resolve();
 

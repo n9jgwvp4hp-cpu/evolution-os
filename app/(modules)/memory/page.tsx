@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import PageHeader from "@/components/PageHeader";
-import { useLocalStorage, uid, timeAgo, type Memory } from "@/lib/store";
+import { uid, timeAgo, type Memory } from "@/lib/store";
+import { useCollection } from "@/lib/collection";
 
 const CATEGORIES: Memory["category"][] = [
   "personal",
@@ -21,7 +22,7 @@ const CAT_STYLE: Record<Memory["category"], string> = {
 };
 
 export default function MemoryPage() {
-  const [memories, setMemories, loaded] = useLocalStorage<Memory[]>("evo.memories", []);
+  const [memories, setMemories, loaded] = useCollection<Memory>("memories", []);
   const [text, setText] = useState("");
   const [category, setCategory] = useState<Memory["category"]>("fact");
   const [query, setQuery] = useState("");

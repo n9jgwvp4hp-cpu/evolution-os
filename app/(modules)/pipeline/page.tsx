@@ -3,13 +3,13 @@
 import { useMemo, useState } from "react";
 import PageHeader from "@/components/PageHeader";
 import {
-  useLocalStorage,
   uid,
   formatMoney,
   type Deal,
   type DealStage,
   type Contact,
 } from "@/lib/store";
+import { useCollection } from "@/lib/collection";
 
 const STAGES: { key: DealStage; label: string; color: string }[] = [
   { key: "lead", label: "Lead", color: "border-sky-500/40" },
@@ -35,8 +35,8 @@ const blank = (): Deal => ({
 });
 
 export default function PipelinePage() {
-  const [deals, setDeals, loaded] = useLocalStorage<Deal[]>("evo.deals", []);
-  const [contacts] = useLocalStorage<Contact[]>("evo.contacts", []);
+  const [deals, setDeals, loaded] = useCollection<Deal>("deals", []);
+  const [contacts] = useCollection<Contact>("contacts", []);
   const [draft, setDraft] = useState<Deal>(blank());
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);

@@ -1,5 +1,6 @@
 import { mutate, getMission, listMissions, uid } from "@/lib/server/db";
-import { getServerTool, serverToolSchemas, buildServerContext } from "@/lib/server/tools";
+import { getServerTool, serverToolSchemas } from "@/lib/server/tools";
+import { buildBrainContext } from "@/lib/server/data";
 import type { Mission, MissionStep, MissionApiMsg } from "@/lib/missionTypes";
 
 /**
@@ -223,7 +224,7 @@ export async function runMission(id: string) {
   const startMission = await getMission(id);
   if (!startMission || startMission.status === "done" || startMission.status === "failed") return;
   await patch(id, { status: "running" });
-  const context = await buildServerContext();
+  const context = await buildBrainContext();
 
   try {
     for (let turn = 0; turn < MAX_TURNS; turn++) {

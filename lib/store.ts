@@ -52,95 +52,19 @@ export function formatDate(ts: number): string {
   });
 }
 
-// ---- Shared data types used across the dashboard ----
-export type Project = {
-  id: string;
-  name: string;
-  description: string;
-  status: "planning" | "active" | "done";
-  createdAt: number;
-};
-
-export type Note = {
-  id: string;
-  title: string;
-  body: string;
-  updatedAt: number;
-};
-
-export type Task = {
-  id: string;
-  title: string;
-  done: boolean;
-  priority: "low" | "medium" | "high";
-  createdAt: number;
-};
-
-export type StoredFile = {
-  id: string;
-  name: string;
-  type: string;
-  size: number;
-  dataUrl: string; // base64 content, stored locally
-  createdAt: number;
-  tags?: string;
-};
-
-// ---- Real-estate CRM: a lead / contact ----
-export type LeadStatus =
-  | "new"
-  | "contacted"
-  | "qualified"
-  | "nurturing"
-  | "client"
-  | "closed"
-  | "lost";
-
-export type Contact = {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  type: "buyer" | "seller" | "investor" | "renter" | "other";
-  status: LeadStatus;
-  source: string; // e.g. Zillow, referral, open house
-  budget: number; // 0 = unknown
-  notes: string;
-  lastTouch: number; // timestamp of last interaction
-  createdAt: number;
-};
-
-// ---- Property pipeline: a deal moving through stages ----
-export type DealStage =
-  | "lead"
-  | "showing"
-  | "offer"
-  | "under_contract"
-  | "closed"
-  | "lost";
-
-export type Deal = {
-  id: string;
-  address: string;
-  price: number;
-  side: "buy" | "sell";
-  stage: DealStage;
-  contactId: string | null; // linked CRM contact
-  commission: number; // expected $
-  closeDate: string; // ISO date string, optional
-  notes: string;
-  createdAt: number;
-  updatedAt: number;
-};
-
-// ---- Long-term memory: facts the assistant should always know ----
-export type Memory = {
-  id: string;
-  text: string;
-  category: "personal" | "business" | "preference" | "fact" | "other";
-  pinned: boolean;
-  createdAt: number;
-};
+// Entity types now live in lib/types.ts (shared by client + server brain).
+export type {
+  Project,
+  Note,
+  Task,
+  StoredFile,
+  LeadStatus,
+  Contact,
+  DealStage,
+  Deal,
+  Memory,
+  BrainKind,
+} from "@/lib/types";
 
 /** Format a number as USD with no cents. */
 export function formatMoney(n: number): string {

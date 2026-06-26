@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import PageHeader from "@/components/PageHeader";
-import { useLocalStorage, uid, formatDate, type Note } from "@/lib/store";
+import { uid, formatDate, type Note } from "@/lib/store";
+import { useCollection } from "@/lib/collection";
 
 export default function NotesPage() {
-  const [notes, setNotes, loaded] = useLocalStorage<Note[]>("evo.notes", []);
+  const [notes, setNotes, loaded] = useCollection<Note>("notes", []);
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const active = notes.find((n) => n.id === activeId) || null;

@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { uid } from "@/lib/store";
-import { buildAssistantContext } from "@/lib/context";
 import { getTool, toolSchemas } from "@/lib/tools";
 import { useSpeechRecognition, speak, stopSpeaking } from "@/lib/voice";
 import { useServerMissions, approveMission } from "@/lib/missionsClient";
@@ -178,7 +177,6 @@ export default function EvolutionOS() {
           body: JSON.stringify({
             messages: apiRef.current,
             tools: toolSchemas(),
-            context: buildAssistantContext(),
             model: savedModel || undefined,
           }),
         });

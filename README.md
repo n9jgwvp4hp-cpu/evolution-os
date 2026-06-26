@@ -48,6 +48,20 @@ a server tool layer (`lib/server/tools.ts`), the mission engine
 (`lib/server/missionEngine.ts`), and a worker started on boot
 (`instrumentation.ts`). The client only watches via `/api/missions`.
 
+## One brain
+Memory, tasks, contacts, deals, and notes live in a single server-side store
+(`lib/server/data.ts`). Everything reads and writes the same brain:
+
+- **Conversation actions** execute server-side via `/api/tools/[name]`.
+- **Missions** call the same capabilities directly.
+- **Module views** read/write through `/api/data/[kind]` (the `useCollection`
+  hook; legacy browser data migrates up once, automatically).
+- The **chat's knowledge** is built from the brain on every turn.
+
+So a contact you add by voice shows up in the CRM, a task a mission creates
+shows up in Tasks, and a fact saved anywhere is known everywhere — and it all
+survives a restart. (Files remain in the browser for now.)
+
 > **Not yet wired (next milestones, need a hosting/permission decision):**
 > deploying to an always-on host for true 24/7 execution, and push
 > notifications to a closed app. Today, results are waiting the moment you

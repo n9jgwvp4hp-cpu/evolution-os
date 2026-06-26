@@ -12,13 +12,14 @@ import {
   type Contact,
   type Deal,
 } from "@/lib/store";
+import { useCollection } from "@/lib/collection";
 
 export default function Dashboard() {
   const [projects] = useLocalStorage<Project[]>("evo.projects", []);
-  const [notes] = useLocalStorage<Note[]>("evo.notes", []);
-  const [tasks] = useLocalStorage<Task[]>("evo.tasks", []);
-  const [contacts] = useLocalStorage<Contact[]>("evo.contacts", []);
-  const [deals] = useLocalStorage<Deal[]>("evo.deals", []);
+  const [notes] = useCollection<Note>("notes", []);
+  const [tasks] = useCollection<Task>("tasks", []);
+  const [contacts] = useCollection<Contact>("contacts", []);
+  const [deals] = useCollection<Deal>("deals", []);
 
   const openTasks = tasks.filter((t) => !t.done);
   const activeDeals = deals.filter((d) => !["closed", "lost"].includes(d.stage));

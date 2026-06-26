@@ -38,7 +38,10 @@ export async function POST(req: NextRequest) {
   }
 
   const model = body.model || process.env.OPENAI_MODEL || "gpt-4o-mini";
-  const context = (body.context ?? "").trim();
+  // Context comes from the shared server brain — one source of truth for what
+  // Evolution knows, identical to what missions see.
+  const { buildBrainContext } = await import("@/lib/server/data");
+  const context = (await buildBrainContext()).trim();
   const mode = body.mode === "mission" ? "mission" : "conversation";
 
   const shared =

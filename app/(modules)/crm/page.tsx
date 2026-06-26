@@ -3,13 +3,13 @@
 import { useMemo, useState } from "react";
 import PageHeader from "@/components/PageHeader";
 import {
-  useLocalStorage,
   uid,
   timeAgo,
   formatMoney,
   type Contact,
   type LeadStatus,
 } from "@/lib/store";
+import { useCollection } from "@/lib/collection";
 
 const STATUSES: LeadStatus[] = [
   "new",
@@ -46,7 +46,7 @@ const blank = (): Contact => ({
 });
 
 export default function CrmPage() {
-  const [contacts, setContacts, loaded] = useLocalStorage<Contact[]>("evo.contacts", []);
+  const [contacts, setContacts, loaded] = useCollection<Contact>("contacts", []);
   const [draft, setDraft] = useState<Contact>(blank());
   const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = useState("");
