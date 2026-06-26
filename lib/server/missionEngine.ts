@@ -338,6 +338,18 @@ export async function runMission(id: string) {
   const context = await buildBrainContext();
 
   try {
+    // Resume after a user approval decision (recorded by approveMission on the
+    // web tier). The worker — not the web — applies it and executes.
+    const resume = await getMission(id);
+    if (resume?.pending?.length && (resume.pendingDecision === true || resume.pendingDecision === false)) {
+      const decision = resume.pendingDecision;
+      const [head, ...rest] = resume.pending;
+      await patch(id, { pending: [], pendingDecision: null });
+      await executeCall(id, head.call, decision);
+      const paused = await processCalls(id, rest.map((p) => p.call));
+      if (paused) return; // another approval needed
+    }
+
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const m = await getMission(id);
       if (!m) return;
@@ -369,14 +381,15 @@ export async function runMission(id: string) {
   }
 }
 
+/**
+ * Record the user's approval decision and hand the mission back to the worker.
+ * Execution never happens here (this may run on the stateless web tier) — the
+ * worker picks the re-queued mission up and applies the decision on resume.
+ */
 export async function approveMission(id: string, approved: boolean) {
   const m = await getMission(id);
   if (!m || m.status !== "needs_approval" || !m.pending.length) return;
-  const [head, ...rest] = m.pending;
-  await patch(id, { status: "running", pending: [] });
-  await executeCall(id, head.call, approved);
-  const paused = await processCalls(id, rest.map((p) => p.call));
-  if (!paused) await runMission(id);
+  await patch(id, { status: "queued", scheduledFor: undefined, pendingDecision: approved });
 }
 
 /* ---- background worker ---- */

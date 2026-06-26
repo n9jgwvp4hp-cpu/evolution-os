@@ -42,6 +42,7 @@ export type Mission = {
   steps: MissionStep[];
   api: MissionApiMsg[]; // running model conversation — enables resume after restart
   pending: PendingCall[]; // tool calls in the current turn awaiting approval
+  pendingDecision?: boolean | null; // user's approve/decline answer, applied by the worker on resume
   result?: string;
   qcLeft: number; // remaining quality-control revision passes
   acknowledged?: boolean; // user has seen the completed result (durable, server-side)
