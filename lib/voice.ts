@@ -5,11 +5,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 /**
  * Voice INPUT — uses the browser's built-in Speech Recognition.
  * Works great in Chrome / Edge / Safari. No API key, completely free.
+ *
+ * `onResult` fires once per spoken utterance with the final transcript.
+ * `interim` updates live as you speak so the user can see they're being heard.
  */
 export function useSpeechRecognition(onResult: (text: string) => void) {
   const [listening, setListening] = useState(false);
   const [supported, setSupported] = useState(false);
+  const [interim, setInterim] = useState("");
   const recognitionRef = useRef<any>(null);
+
+  // Keep the latest callback without re-binding the recognition instance.
+  const onResultRef = useRef(onResult);
+  onResultRef.current = onResult;
 
   useEffect(() => {
     const SR =
@@ -19,16 +27,32 @@ export function useSpeechRecognition(onResult: (text: string) => void) {
     setSupported(true);
 
     const recognition = new SR();
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.continuous = false; // one command per utterance → clean auto-send
+    recognition.interimResults = true; // live transcript
     recognition.lang = "en-US";
 
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      onResult(transcript);
+      let finalText = "";
+      let interimText = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const res = event.results[i];
+        if (res.isFinal) finalText += res[0].transcript;
+        else interimText += res[0].transcript;
+      }
+      setInterim(interimText);
+      if (finalText.trim()) {
+        setInterim("");
+        onResultRef.current(finalText.trim());
+      }
     };
-    recognition.onend = () => setListening(false);
-    recognition.onerror = () => setListening(false);
+    recognition.onend = () => {
+      setListening(false);
+      setInterim("");
+    };
+    recognition.onerror = () => {
+      setListening(false);
+      setInterim("");
+    };
 
     recognitionRef.current = recognition;
     return () => {
@@ -38,8 +62,6 @@ export function useSpeechRecognition(onResult: (text: string) => void) {
         /* noop */
       }
     };
-    // onResult is stable enough for this use; we intentionally run once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const start = useCallback(() => {
@@ -55,9 +77,10 @@ export function useSpeechRecognition(onResult: (text: string) => void) {
   const stop = useCallback(() => {
     recognitionRef.current?.stop();
     setListening(false);
+    setInterim("");
   }, []);
 
-  return { listening, supported, start, stop };
+  return { listening, supported, interim, start, stop };
 }
 
 /**

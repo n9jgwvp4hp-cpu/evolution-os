@@ -244,6 +244,21 @@ export const TOOLS: Tool[] = [
       return { ok: true, remembered: memory.text };
     },
   },
+  {
+    name: "forget_memory",
+    description:
+      "Remove a saved memory when the user asks you to forget something or corrects an outdated fact. Matches by text.",
+    parameters: obj({ query: str("Text describing the memory to forget") }, ["query"]),
+    summarize: (a) => `Forget: “${a.query}”`,
+    async execute(a) {
+      const memories = read<Memory[]>("evo.memories", []);
+      const q = String(a.query).toLowerCase();
+      const target = memories.find((m) => m.text.toLowerCase().includes(q));
+      if (!target) return { ok: false, error: "No matching memory found." };
+      write("evo.memories", memories.filter((m) => m.id !== target.id));
+      return { ok: true, forgot: target.text };
+    },
+  },
 
   // --------------------------------------------------------------- NOTES
   {

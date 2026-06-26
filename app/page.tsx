@@ -27,10 +27,9 @@ type Item =
     };
 
 const EXAMPLES = [
-  "Add a lead: Maria Lopez, buyer, 305-555-0110, budget 600k",
+  "Add Maria Lopez as a buyer lead, 305-555-0110, budget 600k",
   "Remind me to follow up with the Brickell seller tomorrow",
   "Remember I only take listings above $750k",
-  "Draft and send a thank-you email to a new client",
 ];
 
 const STORAGE = "evo.os.chat";
@@ -55,15 +54,13 @@ export default function EvolutionOS() {
   useEffect(() => { handsFreeRef.current = handsFree; }, [handsFree]);
   useEffect(() => { busyRef.current = busy; }, [busy]);
 
-  const { listening, supported, start, stop } = useSpeechRecognition((text) => {
-    if (handsFreeRef.current) {
-      if (!busyRef.current) sendRef.current(text);
-    } else {
-      setInput((p) => (p ? p + " " + text : text));
-    }
+  // Voice is the primary input: a finished utterance is sent immediately.
+  // Speak → done. No extra tap.
+  const { listening, supported, interim, start, stop } = useSpeechRecognition((text) => {
+    if (!busyRef.current) sendRef.current(text);
   });
 
-  // load persisted conversation once
+  // load persisted conversation + voice prefs once
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE);
@@ -72,6 +69,10 @@ export default function EvolutionOS() {
         if (Array.isArray(saved.items)) setItems(saved.items);
         if (Array.isArray(saved.api)) apiRef.current = saved.api;
       }
+      const v = localStorage.getItem("evo.os.voiceOn");
+      if (v !== null) setVoiceOn(v === "1");
+      const h = localStorage.getItem("evo.os.handsFree");
+      if (h !== null) setHandsFree(h === "1");
     } catch { /* ignore */ }
     setLoaded(true);
   }, []);
@@ -85,8 +86,15 @@ export default function EvolutionOS() {
   }, [items, busy, loaded]);
 
   useEffect(() => {
+    if (loaded) localStorage.setItem("evo.os.voiceOn", voiceOn ? "1" : "0");
+  }, [voiceOn, loaded]);
+  useEffect(() => {
+    if (loaded) localStorage.setItem("evo.os.handsFree", handsFree ? "1" : "0");
+  }, [handsFree, loaded]);
+
+  useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [items, busy]);
+  }, [items, busy, interim]);
 
   const add = (item: Item) => setItems((p) => [...p, item]);
   const patch = (id: string, p: Partial<Item>) =>
@@ -236,6 +244,7 @@ export default function EvolutionOS() {
   }
 
   const empty = items.length === 0;
+  const micActive = listening;
 
   return (
     <div className="fixed inset-x-0 top-14 bottom-0 flex flex-col">
@@ -243,7 +252,13 @@ export default function EvolutionOS() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-4 py-5">
           {empty ? (
-            <Hero onPick={send} />
+            <Hero
+              listening={micActive}
+              interim={interim}
+              supported={supported}
+              onTalk={micActive ? stop : start}
+              onPick={send}
+            />
           ) : (
             <div className="space-y-3">
               {items.map((it) =>
@@ -276,12 +291,12 @@ export default function EvolutionOS() {
         </div>
       )}
 
-      {/* hands-free status */}
-      {handsFree && (
+      {/* live listening caption (when not on the hero) */}
+      {!empty && micActive && (
         <div className="max-w-2xl mx-auto w-full px-4 pb-1">
-          <div className="flex items-center gap-2 text-xs text-slate-300">
-            <span className={`typing-dot ${listening ? "" : "opacity-30"}`} />
-            {busy ? "Thinking…" : listening ? "Listening — speak now" : "Hands-free on"}
+          <div className="flex items-center gap-2 text-sm text-accent">
+            <span className="typing-dot" />
+            <span className="truncate">{interim || "Listening…"}</span>
           </div>
         </div>
       )}
@@ -294,13 +309,13 @@ export default function EvolutionOS() {
         >
           <button
             type="button"
-            onClick={listening ? stop : start}
+            onClick={micActive ? stop : start}
             disabled={!supported}
-            title={supported ? "Speak" : "Voice input not supported in this browser"}
-            className={`shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center border transition
-              ${listening
+            title={supported ? "Tap and speak" : "Voice input not supported in this browser"}
+            className={`shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center border transition
+              ${micActive
                 ? "bg-pink-500/20 border-pink-500/50 text-pink-300 animate-pulseGlow"
-                : "bg-white/5 border-white/10 text-slate-300 hover:border-accent/40 disabled:opacity-30"}`}
+                : "bg-gradient-to-br from-accent to-accent2 text-void border-accent shadow-glow disabled:opacity-30 disabled:bg-none disabled:text-slate-400"}`}
           >
             <MicIcon />
           </button>
@@ -312,7 +327,7 @@ export default function EvolutionOS() {
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); }
             }}
             rows={1}
-            placeholder={listening ? "Listening…" : "Tell Evolution OS what to do…"}
+            placeholder={micActive ? "Listening…" : "Speak, or type…"}
             className="input resize-none max-h-40 py-2.5 text-base"
           />
 
@@ -320,44 +335,77 @@ export default function EvolutionOS() {
             type="button"
             onClick={toggleHandsFree}
             disabled={!supported}
-            title="Hands-free voice mode"
-            className={`shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center border transition
+            title="Hands-free conversation mode"
+            className={`shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center border transition
               ${handsFree
-                ? "bg-gradient-to-br from-accent to-accent2 text-void border-accent"
+                ? "bg-gradient-to-br from-accent2 to-accent3 text-void border-accent2"
                 : "bg-white/5 border-white/10 text-slate-300 hover:border-accent/40 disabled:opacity-30"}`}
           >
             <WaveIcon />
           </button>
 
-          <button type="submit" disabled={busy || !input.trim()} className="btn-primary h-11 w-11 !px-0 shrink-0">
-            <SendIcon />
-          </button>
+          {input.trim() && (
+            <button type="submit" disabled={busy} className="btn-primary h-12 w-12 !px-0 shrink-0">
+              <SendIcon />
+            </button>
+          )}
         </form>
         <div className="max-w-2xl mx-auto w-full px-4 pb-2 flex items-center justify-between text-[11px] text-slate-600">
           <button onClick={() => { setVoiceOn((v) => !v); stopSpeaking(); }} className="hover:text-slate-300">
-            {voiceOn ? "🔊 Voice replies on" : "🔇 Voice replies off"}
+            {voiceOn ? "🔊 Spoken replies on" : "🔇 Spoken replies off"}
           </button>
-          {!empty && (
-            <button onClick={newChat} className="hover:text-slate-300">New chat</button>
-          )}
+          {!empty && <button onClick={newChat} className="hover:text-slate-300">New chat</button>}
         </div>
       </div>
     </div>
   );
 }
 
-function Hero({ onPick }: { onPick: (t: string) => void }) {
+function Hero({
+  listening, interim, supported, onTalk, onPick,
+}: {
+  listening: boolean;
+  interim: string;
+  supported: boolean;
+  onTalk: () => void;
+  onPick: (t: string) => void;
+}) {
   return (
-    <div className="flex flex-col items-center text-center pt-10 pb-4">
-      <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-accent to-accent2 shadow-glow flex items-center justify-center mb-5">
-        <span className="text-void font-black text-2xl">E</span>
-      </div>
+    <div className="flex flex-col items-center text-center pt-8 pb-4">
       <h1 className="text-2xl font-bold gradient-text">Evolution OS</h1>
       <p className="text-slate-400 mt-2 max-w-sm">
-        One assistant for everything. Tell it what you need — it figures out the rest
-        and gets it done.
+        Tap, speak your objective, and it gets done.
       </p>
+
+      {/* primary talk affordance */}
+      <button
+        onClick={onTalk}
+        disabled={!supported}
+        className="relative mt-8 mb-3 w-32 h-32 rounded-full flex items-center justify-center
+          bg-gradient-to-br from-accent to-accent2 text-void shadow-glow
+          transition active:scale-95 disabled:opacity-40"
+      >
+        {listening && (
+          <>
+            <span className="absolute inset-0 rounded-full bg-accent/40 animate-ping" />
+            <span className="absolute -inset-2 rounded-full border border-accent/40 animate-pulseGlow" />
+          </>
+        )}
+        <span className="relative scale-[2.2]"><MicIcon /></span>
+      </button>
+
+      <div className="h-7 text-sm">
+        {!supported ? (
+          <span className="text-slate-500">Voice isn&apos;t supported here — type below.</span>
+        ) : listening ? (
+          <span className="text-accent">{interim || "Listening… speak now"}</span>
+        ) : (
+          <span className="text-slate-500">Tap to speak</span>
+        )}
+      </div>
+
       <div className="mt-7 w-full space-y-2">
+        <p className="text-[11px] uppercase tracking-widest text-slate-600 mb-2">Try saying</p>
         {EXAMPLES.map((ex) => (
           <button
             key={ex}
@@ -365,7 +413,7 @@ function Hero({ onPick }: { onPick: (t: string) => void }) {
             className="w-full text-left text-sm rounded-2xl px-4 py-3 bg-white/5 border border-white/10
               hover:border-accent/40 hover:bg-white/10 transition text-slate-200"
           >
-            {ex}
+            “{ex}”
           </button>
         ))}
       </div>
@@ -430,10 +478,7 @@ function ApprovalCard({
             <button onClick={() => onDecide(item.id, true)} className="btn-primary !py-1.5 text-sm flex-1">
               Approve
             </button>
-            <button
-              onClick={() => onDecide(item.id, false)}
-              className="btn-ghost !py-1.5 text-sm flex-1"
-            >
+            <button onClick={() => onDecide(item.id, false)} className="btn-ghost !py-1.5 text-sm flex-1">
               Decline
             </button>
           </div>
