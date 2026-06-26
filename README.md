@@ -12,14 +12,30 @@ pause for a one-tap approval.
 > **One conversation, not many dashboards. One brain, many capabilities.**
 
 ## How it works
-- **Open → Chat → Command → Result.** The assistant (`/`) is the home screen.
-- **Voice-first.** Tap the mic to speak, or the wave for hands-free conversation.
+**Open phone → tap the mic → speak → it understands → it executes → it reports back.**
+
+- **Voice-first.** A finished sentence is sent immediately — speak and it's done.
+  A live transcript shows you're heard; the wave button starts hands-free mode.
 - **It acts, not just answers.** Behind the scenes it calls *capabilities*
   (`lib/tools.ts`) that execute real work; you just see the result.
 - **Approval flow.** Sending email or creating calendar events shows an
   Approve / Decline card before anything happens.
 - **Persistent memory.** Facts, contacts, deals, tasks, notes and files persist
   and are fed back to the assistant in every conversation.
+
+## Two modes (the system picks — you only state objectives)
+- **Conversation Mode** — immediate responses, questions, guidance, and single
+  actions. You speak, it answers or does the one thing, right now.
+- **Mission Mode** — for a big or multi-step objective ("research X, summarize
+  it, and email it to me"), Evolution starts a **mission** that runs in the
+  background: it plans, works step by step, shows live progress, pauses for
+  approval when needed, and **notifies you when it's done** (in-app, spoken, and
+  a system notification). You can keep talking while it works. Missions survive
+  a reload and resume automatically.
+
+New capability domains — email, contacts, calendar, files, AI image & video
+generation, social media, research, real-estate analysis, business operations —
+plug in as more entries in `lib/tools.ts`. The conversation never changes.
 
 ## The modules (hidden behind one menu)
 Tap the ☰ menu to open any capability directly — but you rarely need to. These

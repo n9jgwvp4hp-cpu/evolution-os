@@ -5,6 +5,17 @@ import { uid } from "@/lib/store";
 import { buildAssistantContext } from "@/lib/context";
 import { getTool, toolSchemas } from "@/lib/tools";
 import { useSpeechRecognition, speak, stopSpeaking } from "@/lib/voice";
+import { useMissions, removeMission } from "@/lib/missions";
+import { resolveMissionApproval, resumeInterruptedMissions } from "@/lib/missionRunner";
+import MissionPanel from "@/components/MissionPanel";
+
+function notify(title: string, body: string) {
+  try {
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+      new Notification(title, { body });
+    }
+  } catch { /* ignore */ }
+}
 
 /* ---- conversation model ---- */
 type ApiMsg = {
@@ -46,6 +57,11 @@ export default function EvolutionOS() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<ApiMsg[]>([]);
   const approvals = useRef<Record<string, (ok: boolean) => void>>({});
+
+  // Background missions
+  const missions = useMissions();
+  const missionStatus = useRef<Record<string, string>>({});
+  const seeded = useRef(false);
 
   // refs so the speech callback (bound once) sees current values
   const handsFreeRef = useRef(handsFree);
@@ -100,6 +116,30 @@ export default function EvolutionOS() {
   const patch = (id: string, p: Partial<Item>) =>
     setItems((prev) => prev.map((it) => (it.id === id ? ({ ...it, ...p } as Item) : it)));
 
+  // Mission lifecycle: report back when one finishes; resume on load.
+  useEffect(() => {
+    if (!loaded) return;
+    if (!seeded.current) {
+      for (const m of missions) missionStatus.current[m.id] = m.status;
+      seeded.current = true;
+      resumeInterruptedMissions(missions);
+      return;
+    }
+    for (const m of missions) {
+      const prev = missionStatus.current[m.id];
+      if (prev === m.status) continue;
+      missionStatus.current[m.id] = m.status;
+      if (m.status === "done" && prev && prev !== "done") {
+        const text = m.result || "Mission complete.";
+        add({ id: uid(), kind: "msg", role: "assistant", content: "✅ " + text });
+        notify("Evolution OS — mission complete", text.slice(0, 180));
+        if (voiceOn) speak(text);
+      } else if (m.status === "failed" && prev && prev !== "failed") {
+        add({ id: uid(), kind: "msg", role: "assistant", content: "⚠️ Mission failed: " + (m.result || "") });
+      }
+    }
+  }, [missions, loaded, voiceOn]);
+
   function requestApproval(tool: string, summary: string): Promise<{ ok: boolean; id: string }> {
     const id = uid();
     add({ id, kind: "approval", tool, summary, status: "pending" });
@@ -115,6 +155,10 @@ export default function EvolutionOS() {
     stopSpeaking();
     setError(null);
     setInput("");
+    // Ask once so completed missions can notify even if the app is backgrounded.
+    try {
+      if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+    } catch { /* ignore */ }
     add({ id: uid(), kind: "msg", role: "user", content });
     apiRef.current.push({ role: "user", content });
     setBusy(true);
@@ -251,6 +295,11 @@ export default function EvolutionOS() {
       {/* transcript */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-4 py-5">
+          <MissionPanel
+            missions={missions}
+            onApprove={resolveMissionApproval}
+            onDismiss={removeMission}
+          />
           {empty ? (
             <Hero
               listening={micActive}

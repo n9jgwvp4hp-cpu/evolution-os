@@ -374,15 +374,55 @@ export const TOOLS: Tool[] = [
       return { ok: true, created: a.summary, link: data.link };
     },
   },
+
+  // ---------------------------------------------------- MISSION HANDOFF
+  // Conversation Mode → Mission Mode. The model calls this when an objective
+  // is large or multi-step; the runtime executes it in the background.
+  {
+    name: "start_mission",
+    description:
+      "Start a long-running MISSION that executes in the background with progress updates and a completion report. " +
+      "Use this for objectives that take several steps or are better done in the background — research, " +
+      "multi-step operations, draft-then-send sequences, anything that isn't a single quick action. " +
+      "For a quick answer or one simple action, do it directly instead. " +
+      "After calling this, tell the user in one short line that you've started and will report back.",
+    parameters: obj(
+      { objective: str("A clear, self-contained description of the goal to fully accomplish") },
+      ["objective"]
+    ),
+    summarize: (a) => `Start mission: ${a.objective}`,
+    async execute(a) {
+      const { createMission } = await import("@/lib/missions");
+      const { runMission } = await import("@/lib/missionRunner");
+      const m = createMission(String(a.objective));
+      void runMission(m.id); // fire-and-forget; runs in the background
+      return {
+        ok: true,
+        started: true,
+        missionId: m.id,
+        note: "Mission running in the background. The user will see live progress and be notified on completion.",
+      };
+    },
+  },
+
+  /* ----------------------------------------------------------------------
+   * FUTURE CAPABILITY DOMAINS
+   * Evolution OS grows by adding tools here — the conversation never changes.
+   * Each new domain (and the businesses built on it) plugs in as more Tool
+   * entries; the model routes objectives to them automatically. Planned:
+   *   • Email & comms   • Contacts/CRM   • Calendar & scheduling
+   *   • Files & documents   • AI image generation   • AI video generation
+   *   • Social media   • Research   • Real-estate analysis   • Business ops
+   * -------------------------------------------------------------------- */
 ];
 
 export function getTool(name: string): Tool | undefined {
   return TOOLS.find((t) => t.name === name);
 }
 
-/** OpenAI tool-schema array sent with each request. */
-export function toolSchemas() {
-  return TOOLS.map((t) => ({
+/** OpenAI tool-schema array sent with each request (optionally excluding some). */
+export function toolSchemas(exclude: string[] = []) {
+  return TOOLS.filter((t) => !exclude.includes(t.name)).map((t) => ({
     type: "function" as const,
     function: { name: t.name, description: t.description, parameters: t.parameters },
   }));
