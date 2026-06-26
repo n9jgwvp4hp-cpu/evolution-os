@@ -119,6 +119,24 @@ export const SERVER_TOOLS: ServerTool[] = [
 
   // ---- Outward-facing capabilities: real, completed outcomes ----
   {
+    name: "web_search",
+    description:
+      "Search the web and get a list of results (title, url, snippet). Use this to DISCOVER sources " +
+      "for research, then read the promising ones with fetch_url. Run several focused searches with " +
+      "different queries to gather from multiple sources.",
+    parameters: obj({ query: str("The search query"), count: num("How many results, default 8, max 15") }, ["query"]),
+    summarize: (a) => `Search web: “${a.query}”`,
+    async execute(a) {
+      const { searchWeb, searchProvider } = await import("@/lib/server/search");
+      try {
+        const results = await searchWeb(String(a.query), Math.min(Number(a.count) || 8, 15));
+        return { ok: true, provider: searchProvider(), query: a.query, count: results.length, results };
+      } catch (e: any) {
+        return { ok: false, error: e?.message || "Web search failed." };
+      }
+    },
+  },
+  {
     name: "fetch_url",
     description:
       "Fetch the readable text of a web page by its URL. Use to read an article, listing, or page the objective references, then work from its contents.",

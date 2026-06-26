@@ -124,9 +124,22 @@ export async function forgetMemory(a: any) {
 }
 
 export async function createNote(a: any) {
-  const note: Note = { id: uid(), title: String(a.title), body: a.body || "", updatedAt: Date.now() };
-  await mutate((db) => db.notes.unshift(note));
-  return { ok: true, created: note.title };
+  // Upsert by title: re-saving "the report" updates it instead of creating
+  // duplicates (e.g. when a quality-control pass revises the content).
+  const title = String(a.title);
+  const body = a.body || "";
+  let updated = false;
+  await mutate((db) => {
+    const existing = db.notes.find((n) => n.title.toLowerCase() === title.toLowerCase());
+    if (existing) {
+      existing.body = body || existing.body;
+      existing.updatedAt = Date.now();
+      updated = true;
+    } else {
+      db.notes.unshift({ id: uid(), title, body, updatedAt: Date.now() });
+    }
+  });
+  return { ok: true, [updated ? "updated" : "created"]: title };
 }
 
 export async function searchData(a: any) {

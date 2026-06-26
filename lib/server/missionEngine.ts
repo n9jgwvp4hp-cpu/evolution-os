@@ -13,7 +13,7 @@ import type { Mission, MissionStep, MissionApiMsg } from "@/lib/missionTypes";
  * a restart resumes missions exactly where they left off.
  */
 
-const MAX_TURNS = 14;
+const MAX_TURNS = 22; // research missions need room to search + read several sources
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
 function model() {
@@ -110,9 +110,21 @@ const MISSION_SYSTEM = (context: string) =>
   "before acting (e.g. never send the same email twice).\n" +
   "CRITICAL honesty: only claim what you actually did. If a capability failed or isn't available " +
   "(e.g. Google not connected), say so plainly — never fabricate results, research, or actions.\n" +
-  "When fully done, send a final message with NO tool calls: a concise report of what you " +
-  "accomplished, listing any externally-visible actions you took (emails sent, events created) and " +
-  "any result the user needs.\n" +
+  "When fully done, send a final message with NO tool calls. This final message IS the deliverable " +
+  "the user reads — it must contain the actual RESULT (the findings, the ranked list, the answer), " +
+  "not a description of what you saved or revised. Include the key results inline, list any " +
+  "externally-visible actions you took (emails sent, events created), and note where fuller detail " +
+  "was saved (e.g. a note) if relevant.\n" +
+  "\nRESEARCH method (when the objective requires finding information): " +
+  "(1) run several web_search queries with different angles to find sources; " +
+  "(2) fetch_url the most promising results and read the actual content from MULTIPLE sources; " +
+  "(3) extract concrete facts and keep the source URL for each; " +
+  "(4) analyze and synthesize into a clear, ranked report, citing the source URL for each item; " +
+  "(5) aim for the count or scope the user asked for. " +
+  "NEVER invent specifics — prices, addresses, names, counts, or listings you did not actually read. " +
+  "If you can only verify fewer items than requested, return the verified ones with their sources and " +
+  "state plainly how many you confirmed and what limited the rest. A short, honest, sourced report " +
+  "beats a long fabricated one.\n" +
   (context ? "\nWhat Evolution already knows:\n" + context : "");
 
 function parseArgs(call: any) {
@@ -217,7 +229,14 @@ async function verify(objective: string, actions: string[], report: string) {
       "You are a strict quality controller for Evolution OS. Given an OBJECTIVE, the ACTIONS that " +
       "were actually executed (with results), and a PROPOSED REPORT to the user, decide whether the " +
       "objective was genuinely accomplished and whether EVERY claim in the report is supported by the " +
-      "actions. Be skeptical: if the report claims something that was not actually done, it fails. " +
+      "actions. Be skeptical.\n" +
+      "Rules:\n" +
+      "- If the report claims an action that was not actually executed, it FAILS.\n" +
+      "- For RESEARCH reports: specific facts (prices, addresses, names, listings, figures) must be " +
+      "grounded in sources actually read via fetch_url. Fabricated or uncited specifics FAIL. " +
+      "Inventing items to hit a requested count (e.g. padding to 20) FAILS — an honest report of fewer, " +
+      "verified items with sources PASSES.\n" +
+      "- A report that truthfully states what could and could not be verified PASSES.\n" +
       'Respond ONLY as JSON: {"verdict":"pass"|"revise","issues":[string],"guidance":string}.',
   };
   const user: MissionApiMsg = {
