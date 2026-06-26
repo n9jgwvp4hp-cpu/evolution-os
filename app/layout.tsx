@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import Sidebar from "@/components/Sidebar";
-import MobileNav from "@/components/MobileNav";
+import AppShell from "@/components/AppShell";
 
 export const metadata: Metadata = {
   title: "Evolution OS",
@@ -43,15 +42,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen font-sans antialiased">
-        <div className="flex min-h-screen">
-          <Sidebar />
-          {/* Main content area — left margin clears the fixed sidebar on desktop;
-              extra bottom padding on mobile clears the bottom tab bar. */}
-          <main className="flex-1 lg:ml-64 px-4 pb-28 pt-20 lg:pt-8 lg:pb-8 lg:px-8">
-            {children}
-          </main>
-        </div>
-        <MobileNav />
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

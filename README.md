@@ -1,26 +1,49 @@
 # 🧬 Evolution OS
 
-Your personal **real-estate AI assistant** — voice-first chat that knows your
-business, a leads CRM, a property-deal pipeline, long-term memory, Gmail &
-Google Calendar, tasks, notes, and searchable file storage. Built with
-**Next.js + TypeScript + Tailwind**, connected to the **OpenAI API**, and
-optimized for **iPhone** (installable as a home-screen app).
+**One intelligence you talk to from your phone that gets work done across all
+your businesses, projects, and life.**
 
-## ✨ What's inside
-| Feature | Where | Notes |
-|---|---|---|
-| 🎙️ Voice-first assistant | **AI Assistant** | Type or talk; tap the wave icon for hands-free conversation. Knows your CRM, deals, tasks & notes. |
-| 🧠 Long-term memory | **Memory** | Facts you save are auto-injected into every chat. |
-| 👥 CRM for leads | **CRM · Leads** | Buyers/sellers/investors with status, budget, source; tap-to-call/text/email. |
-| 🏠 Property pipeline | **Pipeline** | Kanban of deals from lead → close, with pipeline value & commission totals. |
-| ✅ Tasks · 📝 Notes | **Tasks / Notes** | Quick capture with priorities. |
-| ✉️ Gmail · 📅 Calendar | **Gmail / Calendar** | Read & send mail, view & create events (needs Google setup — see below). |
-| 📁 File search & upload | **Files** | Drag-drop, tag, and search files stored in your browser. |
-| 📱 Mobile / iPhone | everywhere | Bottom tab bar, safe-area aware, add to Home Screen. |
+You open the app, you're in a conversation, you give a command, you get a
+result. That's the whole experience. The system decides which capabilities to
+use — creating a task, adding a contact, logging a deal, remembering a fact,
+sending an email, booking a calendar event — and does it. Sensitive actions
+pause for a one-tap approval.
 
-> Your CRM, deals, tasks, notes, memory, and files are stored locally in your
-> browser. Nothing is uploaded to a server (Gmail/Calendar are accessed live
-> via secure server-side tokens).
+> **One conversation, not many dashboards. One brain, many capabilities.**
+
+## How it works
+- **Open → Chat → Command → Result.** The assistant (`/`) is the home screen.
+- **Voice-first.** Tap the mic to speak, or the wave for hands-free conversation.
+- **It acts, not just answers.** Behind the scenes it calls *capabilities*
+  (`lib/tools.ts`) that execute real work; you just see the result.
+- **Approval flow.** Sending email or creating calendar events shows an
+  Approve / Decline card before anything happens.
+- **Persistent memory.** Facts, contacts, deals, tasks, notes and files persist
+  and are fed back to the assistant in every conversation.
+
+## The modules (hidden behind one menu)
+Tap the ☰ menu to open any capability directly — but you rarely need to. These
+are the surfaces the intelligence operates on, not the primary experience:
+
+| Module | What it holds |
+|---|---|
+| **Overview** | Everything at a glance |
+| **Contacts** | People & leads (CRM) |
+| **Deals** | Property pipeline |
+| **Tasks**, **Notes** | To-dos and saved writing |
+| **Memory** | What the assistant durably remembers |
+| **Email**, **Calendar** | Gmail & Google Calendar (needs Google setup — see below) |
+| **Files** | Documents, searchable & tagged |
+
+New businesses plug in by adding capabilities in `lib/tools.ts` — the chat
+experience never changes.
+
+Built with **Next.js + TypeScript + Tailwind**, the **OpenAI API** (tool
+calling), and optimized for **iPhone** (installable home-screen app).
+
+> Your contacts, deals, tasks, notes, memory, files, and conversation are
+> stored locally in your browser. Nothing is uploaded to a server (Gmail /
+> Calendar are accessed live via secure server-side tokens).
 
 ---
 

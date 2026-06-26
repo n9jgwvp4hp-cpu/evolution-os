@@ -1,207 +1,474 @@
 "use client";
 
-import Link from "next/link";
-import PageHeader from "@/components/PageHeader";
-import {
-  useLocalStorage,
-  formatMoney,
-  timeAgo,
-  type Project,
-  type Note,
-  type Task,
-  type Contact,
-  type Deal,
-} from "@/lib/store";
+import { useEffect, useRef, useState } from "react";
+import { uid } from "@/lib/store";
+import { buildAssistantContext } from "@/lib/context";
+import { getTool, toolSchemas } from "@/lib/tools";
+import { useSpeechRecognition, speak, stopSpeaking } from "@/lib/voice";
 
-export default function Dashboard() {
-  const [projects] = useLocalStorage<Project[]>("evo.projects", []);
-  const [notes] = useLocalStorage<Note[]>("evo.notes", []);
-  const [tasks] = useLocalStorage<Task[]>("evo.tasks", []);
-  const [contacts] = useLocalStorage<Contact[]>("evo.contacts", []);
-  const [deals] = useLocalStorage<Deal[]>("evo.deals", []);
+/* ---- conversation model ---- */
+type ApiMsg = {
+  role: "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: any[];
+  tool_call_id?: string;
+};
 
-  const openTasks = tasks.filter((t) => !t.done);
-  const activeDeals = deals.filter((d) => !["closed", "lost"].includes(d.stage));
-  const activeLeads = contacts.filter((c) => !["closed", "lost"].includes(c.status));
-  const pipelineValue = activeDeals.reduce((s, d) => s + (d.price || 0), 0);
+type Item =
+  | { id: string; kind: "msg"; role: "user" | "assistant"; content: string }
+  | { id: string; kind: "action"; label: string; status: "running" | "done" | "error"; detail?: string }
+  | {
+      id: string;
+      kind: "approval";
+      tool: string;
+      summary: string;
+      status: "pending" | "approved" | "declined" | "done" | "error";
+      detail?: string;
+    };
 
-  const stats = [
-    { label: "Active Leads", value: activeLeads.length, sub: `${contacts.length} total`, href: "/crm" },
-    { label: "Open Deals", value: activeDeals.length, sub: formatMoney(pipelineValue), href: "/pipeline" },
-    { label: "Open Tasks", value: openTasks.length, sub: `${tasks.length} total`, href: "/tasks" },
-    { label: "Notes", value: notes.length, sub: "saved", href: "/notes" },
-  ];
+const EXAMPLES = [
+  "Add a lead: Maria Lopez, buyer, 305-555-0110, budget 600k",
+  "Remind me to follow up with the Brickell seller tomorrow",
+  "Remember I only take listings above $750k",
+  "Draft and send a thank-you email to a new client",
+];
 
-  const hotDeals = [...activeDeals]
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, 4);
-  const recentLeads = [...activeLeads]
-    .sort((a, b) => b.lastTouch - a.lastTouch)
-    .slice(0, 5);
-  const priorityTasks = [...openTasks]
-    .sort((a, b) => order(b.priority) - order(a.priority))
-    .slice(0, 5);
-  const recentNotes = [...notes].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 3);
+const STORAGE = "evo.os.chat";
+
+export default function EvolutionOS() {
+  const [items, setItems] = useState<Item[]>([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [voiceOn, setVoiceOn] = useState(true);
+  const [handsFree, setHandsFree] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const apiRef = useRef<ApiMsg[]>([]);
+  const approvals = useRef<Record<string, (ok: boolean) => void>>({});
+
+  // refs so the speech callback (bound once) sees current values
+  const handsFreeRef = useRef(handsFree);
+  const busyRef = useRef(busy);
+  const sendRef = useRef<(t: string) => void>(() => {});
+  useEffect(() => { handsFreeRef.current = handsFree; }, [handsFree]);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
+
+  const { listening, supported, start, stop } = useSpeechRecognition((text) => {
+    if (handsFreeRef.current) {
+      if (!busyRef.current) sendRef.current(text);
+    } else {
+      setInput((p) => (p ? p + " " + text : text));
+    }
+  });
+
+  // load persisted conversation once
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (Array.isArray(saved.items)) setItems(saved.items);
+        if (Array.isArray(saved.api)) apiRef.current = saved.api;
+      }
+    } catch { /* ignore */ }
+    setLoaded(true);
+  }, []);
+
+  // persist only when idle (guarantees a consistent tool/assistant history)
+  useEffect(() => {
+    if (!loaded || busy) return;
+    try {
+      localStorage.setItem(STORAGE, JSON.stringify({ items, api: apiRef.current }));
+    } catch { /* ignore */ }
+  }, [items, busy, loaded]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [items, busy]);
+
+  const add = (item: Item) => setItems((p) => [...p, item]);
+  const patch = (id: string, p: Partial<Item>) =>
+    setItems((prev) => prev.map((it) => (it.id === id ? ({ ...it, ...p } as Item) : it)));
+
+  function requestApproval(tool: string, summary: string): Promise<{ ok: boolean; id: string }> {
+    const id = uid();
+    add({ id, kind: "approval", tool, summary, status: "pending" });
+    return new Promise((resolve) => {
+      approvals.current[id] = (ok) => resolve({ ok, id });
+    });
+  }
+
+  async function send(text: string) {
+    const content = text.trim();
+    if (!content || busyRef.current) return;
+
+    stopSpeaking();
+    setError(null);
+    setInput("");
+    add({ id: uid(), kind: "msg", role: "user", content });
+    apiRef.current.push({ role: "user", content });
+    setBusy(true);
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const savedKey = localStorage.getItem("evo.openaiKey") || "";
+    const savedModel = localStorage.getItem("evo.model") || "";
+    if (savedKey) headers["x-openai-key"] = savedKey;
+
+    try {
+      let finalText = "";
+      for (let step = 0; step < 8; step++) {
+        const res = await fetch("/api/agent", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            messages: apiRef.current,
+            tools: toolSchemas(),
+            context: buildAssistantContext(),
+            model: savedModel || undefined,
+          }),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          throw new Error(d.error || `Request failed (${res.status}).`);
+        }
+        const { message } = await res.json();
+        const calls: any[] = message.tool_calls || [];
+        apiRef.current.push({
+          role: "assistant",
+          content: message.content ?? "",
+          tool_calls: calls.length ? calls : undefined,
+        });
+
+        if (message.content && message.content.trim()) {
+          add({ id: uid(), kind: "msg", role: "assistant", content: message.content.trim() });
+          finalText = message.content.trim();
+        }
+
+        if (!calls.length) break;
+
+        // execute each requested capability
+        for (const call of calls) {
+          const name = call.function?.name as string;
+          let args: any = {};
+          try { args = JSON.parse(call.function?.arguments || "{}"); } catch { /* ignore */ }
+          const tool = getTool(name);
+
+          let result: any;
+          if (!tool) {
+            result = { ok: false, error: "Unknown capability." };
+          } else if (tool.requiresApproval) {
+            const { ok, id } = await requestApproval(name, tool.summarize(args));
+            if (!ok) {
+              patch(id, { status: "declined" });
+              result = { ok: false, declined: true };
+            } else {
+              patch(id, { status: "approved" });
+              try {
+                result = await tool.execute(args);
+                patch(id, {
+                  status: result.ok === false ? "error" : "done",
+                  detail: result.ok === false ? String(result.error || "Failed") : undefined,
+                });
+              } catch (e: any) {
+                result = { ok: false, error: e?.message || "Failed" };
+                patch(id, { status: "error", detail: result.error });
+              }
+            }
+          } else {
+            const id = uid();
+            add({ id, kind: "action", label: tool.summarize(args), status: "running" });
+            try {
+              result = await tool.execute(args);
+              patch(id, {
+                status: result.ok === false ? "error" : "done",
+                detail: result.ok === false ? String(result.error || "Failed") : undefined,
+              });
+            } catch (e: any) {
+              result = { ok: false, error: e?.message || "Failed" };
+              patch(id, { status: "error", detail: result.error });
+            }
+          }
+
+          apiRef.current.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: JSON.stringify(result),
+          });
+        }
+      }
+
+      if (voiceOn && finalText) {
+        speak(finalText, () => {
+          if (handsFreeRef.current && supported) { try { start(); } catch { /* noop */ } }
+        });
+      }
+    } catch (e: any) {
+      const msg = e?.message || "Something went wrong.";
+      setError(msg);
+      add({ id: uid(), kind: "msg", role: "assistant", content: "⚠️ " + msg });
+    } finally {
+      setBusy(false);
+    }
+  }
+  sendRef.current = send;
+
+  function resolveApproval(id: string, ok: boolean) {
+    approvals.current[id]?.(ok);
+    delete approvals.current[id];
+  }
+
+  function toggleHandsFree() {
+    const next = !handsFree;
+    setHandsFree(next);
+    stopSpeaking();
+    if (next && supported) { try { start(); } catch { /* noop */ } }
+    else stop();
+  }
+
+  function newChat() {
+    stopSpeaking();
+    apiRef.current = [];
+    setItems([]);
+    setError(null);
+    try { localStorage.removeItem(STORAGE); } catch { /* ignore */ }
+  }
+
+  const empty = items.length === 0;
 
   return (
-    <div className="max-w-6xl mx-auto">
-      <PageHeader
-        title="Command Center"
-        subtitle="Everything that matters, in one place."
-        action={
-          <Link href="/chat" className="btn-primary">
-            🎙️ Ask assistant
-          </Link>
-        }
-      />
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        {stats.map((s) => (
-          <Link key={s.label} href={s.href} className="card group">
-            <div className="text-slate-400 text-sm">{s.label}</div>
-            <div className="text-3xl font-bold text-white mt-1 group-hover:text-accent transition">
-              {s.value}
+    <div className="fixed inset-x-0 top-14 bottom-0 flex flex-col">
+      {/* transcript */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <div className="max-w-2xl mx-auto px-4 py-5">
+          {empty ? (
+            <Hero onPick={send} />
+          ) : (
+            <div className="space-y-3">
+              {items.map((it) =>
+                it.kind === "msg" ? (
+                  <Bubble key={it.id} role={it.role} content={it.content} />
+                ) : it.kind === "action" ? (
+                  <ActionChip key={it.id} label={it.label} status={it.status} detail={it.detail} />
+                ) : (
+                  <ApprovalCard key={it.id} item={it} onDecide={resolveApproval} />
+                )
+              )}
+              {busy && (
+                <div className="flex items-center gap-1.5 px-1 py-1">
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                  <span className="text-xs text-slate-500 ml-1">working…</span>
+                </div>
+              )}
             </div>
-            <div className="text-xs text-slate-500 mt-1">{s.sub}</div>
-          </Link>
-        ))}
+          )}
+        </div>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4">
-        {/* Pipeline */}
-        <Panel title="Hot deals" href="/pipeline" cta="Pipeline">
-          {hotDeals.length === 0 ? (
-            <Empty label="No active deals. Add one in the pipeline." />
-          ) : (
-            <div className="space-y-2">
-              {hotDeals.map((d) => (
-                <Link key={d.id} href="/pipeline" className="row">
-                  <div className="min-w-0">
-                    <div className="text-sm text-slate-100 truncate">{d.address}</div>
-                    <div className="text-[11px] text-slate-500 capitalize">
-                      {d.stage.replace("_", " ")} · {d.side === "buy" ? "buyer" : "seller"}
-                    </div>
-                  </div>
-                  <span className="text-xs text-accent shrink-0">{formatMoney(d.price)}</span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </Panel>
+      {error && (
+        <div className="max-w-2xl mx-auto w-full px-4">
+          <div className="text-sm text-pink-300 bg-pink-500/10 border border-pink-500/30 rounded-xl px-4 py-2">
+            {error} <a href="/settings" className="underline text-accent">Settings</a>
+          </div>
+        </div>
+      )}
 
-        {/* Leads */}
-        <Panel title="Recent leads" href="/crm" cta="CRM">
-          {recentLeads.length === 0 ? (
-            <Empty label="No leads yet. Add contacts in the CRM." />
-          ) : (
-            <div className="space-y-2">
-              {recentLeads.map((c) => (
-                <Link key={c.id} href="/crm" className="row">
-                  <div className="min-w-0">
-                    <div className="text-sm text-slate-100 truncate">{c.name}</div>
-                    <div className="text-[11px] text-slate-500 capitalize">
-                      {c.type} · {c.status}
-                    </div>
-                  </div>
-                  <span className="text-[11px] text-slate-600 shrink-0">{timeAgo(c.lastTouch)}</span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </Panel>
+      {/* hands-free status */}
+      {handsFree && (
+        <div className="max-w-2xl mx-auto w-full px-4 pb-1">
+          <div className="flex items-center gap-2 text-xs text-slate-300">
+            <span className={`typing-dot ${listening ? "" : "opacity-30"}`} />
+            {busy ? "Thinking…" : listening ? "Listening — speak now" : "Hands-free on"}
+          </div>
+        </div>
+      )}
 
-        {/* Tasks */}
-        <Panel title="Priority tasks" href="/tasks" cta="Tasks">
-          {priorityTasks.length === 0 ? (
-            <Empty label="No open tasks. Nice and clear." />
-          ) : (
-            <div className="space-y-2">
-              {priorityTasks.map((t) => (
-                <Link key={t.id} href="/tasks" className="row">
-                  <span className="text-sm text-slate-100 truncate">{t.title}</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full border capitalize shrink-0 ${pStyle(t.priority)}`}>
-                    {t.priority}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </Panel>
+      {/* composer */}
+      <div className="border-t border-white/10 bg-void/70 backdrop-blur-xl pb-safe">
+        <form
+          onSubmit={(e) => { e.preventDefault(); send(input); }}
+          className="max-w-2xl mx-auto w-full px-3 pt-2.5 pb-2 flex items-end gap-2"
+        >
+          <button
+            type="button"
+            onClick={listening ? stop : start}
+            disabled={!supported}
+            title={supported ? "Speak" : "Voice input not supported in this browser"}
+            className={`shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center border transition
+              ${listening
+                ? "bg-pink-500/20 border-pink-500/50 text-pink-300 animate-pulseGlow"
+                : "bg-white/5 border-white/10 text-slate-300 hover:border-accent/40 disabled:opacity-30"}`}
+          >
+            <MicIcon />
+          </button>
 
-        {/* Notes */}
-        <Panel title="Recent notes" href="/notes" cta="Notes">
-          {recentNotes.length === 0 ? (
-            <Empty label="No notes yet. Capture an idea." />
-          ) : (
-            <div className="space-y-2">
-              {recentNotes.map((n) => (
-                <Link key={n.id} href="/notes" className="row">
-                  <div className="min-w-0">
-                    <div className="text-sm text-slate-100 truncate">{n.title || "Untitled"}</div>
-                    <div className="text-[11px] text-slate-500 truncate">
-                      {n.body ? n.body.slice(0, 50) : "Empty"}
-                    </div>
-                  </div>
-                  <span className="text-[11px] text-slate-600 shrink-0">{timeAgo(n.updatedAt)}</span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </Panel>
-      </div>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); }
+            }}
+            rows={1}
+            placeholder={listening ? "Listening…" : "Tell Evolution OS what to do…"}
+            className="input resize-none max-h-40 py-2.5 text-base"
+          />
 
-      {/* Quick actions */}
-      <div className="glass p-5 mt-4">
-        <h3 className="font-semibold text-white mb-3">Quick actions</h3>
-        <div className="flex flex-wrap gap-2">
-          <QuickLink href="/crm" label="+ Lead" />
-          <QuickLink href="/pipeline" label="+ Deal" />
-          <QuickLink href="/tasks" label="+ Task" />
-          <QuickLink href="/notes" label="+ Note" />
-          <QuickLink href="/memory" label="🧠 Teach memory" />
-          <QuickLink href="/mail" label="✉️ Email" />
-          <QuickLink href="/calendar" label="📅 Calendar" />
+          <button
+            type="button"
+            onClick={toggleHandsFree}
+            disabled={!supported}
+            title="Hands-free voice mode"
+            className={`shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center border transition
+              ${handsFree
+                ? "bg-gradient-to-br from-accent to-accent2 text-void border-accent"
+                : "bg-white/5 border-white/10 text-slate-300 hover:border-accent/40 disabled:opacity-30"}`}
+          >
+            <WaveIcon />
+          </button>
+
+          <button type="submit" disabled={busy || !input.trim()} className="btn-primary h-11 w-11 !px-0 shrink-0">
+            <SendIcon />
+          </button>
+        </form>
+        <div className="max-w-2xl mx-auto w-full px-4 pb-2 flex items-center justify-between text-[11px] text-slate-600">
+          <button onClick={() => { setVoiceOn((v) => !v); stopSpeaking(); }} className="hover:text-slate-300">
+            {voiceOn ? "🔊 Voice replies on" : "🔇 Voice replies off"}
+          </button>
+          {!empty && (
+            <button onClick={newChat} className="hover:text-slate-300">New chat</button>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function order(p: Task["priority"]) {
-  return p === "high" ? 3 : p === "medium" ? 2 : 1;
-}
-function pStyle(p: Task["priority"]) {
-  return p === "high"
-    ? "text-pink-300 border-pink-500/30"
-    : p === "medium"
-    ? "text-amber-300 border-amber-500/30"
-    : "text-slate-400 border-slate-500/30";
-}
-
-function Panel({
-  title, href, cta, children,
-}: { title: string; href: string; cta: string; children: React.ReactNode }) {
+function Hero({ onPick }: { onPick: (t: string) => void }) {
   return (
-    <div className="glass p-5">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-white">{title}</h3>
-        <Link href={href} className="text-xs text-accent hover:underline">{cta} →</Link>
+    <div className="flex flex-col items-center text-center pt-10 pb-4">
+      <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-accent to-accent2 shadow-glow flex items-center justify-center mb-5">
+        <span className="text-void font-black text-2xl">E</span>
       </div>
-      {children}
+      <h1 className="text-2xl font-bold gradient-text">Evolution OS</h1>
+      <p className="text-slate-400 mt-2 max-w-sm">
+        One assistant for everything. Tell it what you need — it figures out the rest
+        and gets it done.
+      </p>
+      <div className="mt-7 w-full space-y-2">
+        {EXAMPLES.map((ex) => (
+          <button
+            key={ex}
+            onClick={() => onPick(ex)}
+            className="w-full text-left text-sm rounded-2xl px-4 py-3 bg-white/5 border border-white/10
+              hover:border-accent/40 hover:bg-white/10 transition text-slate-200"
+          >
+            {ex}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
-function Empty({ label }: { label: string }) {
-  return <p className="text-sm text-slate-500 py-4 text-center">{label}</p>;
-}
-function QuickLink({ href, label }: { href: string; label: string }) {
+
+function Bubble({ role, content }: { role: "user" | "assistant"; content: string }) {
+  const isUser = role === "user";
   return (
-    <Link
-      href={href}
-      className="rounded-xl px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-accent/40 text-sm transition"
-    >
-      {label}
-    </Link>
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"} animate-floatUp`}>
+      <div
+        className={`max-w-[88%] rounded-2xl px-4 py-2.5 whitespace-pre-wrap leading-relaxed text-[15px]
+          ${isUser
+            ? "bg-gradient-to-br from-accent/25 to-accent2/25 border border-accent/30 text-white"
+            : "bg-white/5 border border-white/10 text-slate-100"}`}
+      >
+        {content}
+      </div>
+    </div>
+  );
+}
+
+function ActionChip({
+  label, status, detail,
+}: { label: string; status: "running" | "done" | "error"; detail?: string }) {
+  const icon = status === "running" ? "◌" : status === "done" ? "✓" : "✕";
+  const tone =
+    status === "error"
+      ? "text-pink-300 border-pink-500/30"
+      : status === "done"
+      ? "text-emerald-300 border-emerald-500/30"
+      : "text-slate-400 border-white/10";
+  return (
+    <div className="flex justify-start animate-floatUp">
+      <div className={`inline-flex items-center gap-2 text-xs rounded-full border px-3 py-1.5 bg-black/20 ${tone}`}>
+        <span className={status === "running" ? "animate-pulseGlow" : ""}>{icon}</span>
+        <span>{label}</span>
+        {detail && <span className="text-pink-300/80">· {detail}</span>}
+      </div>
+    </div>
+  );
+}
+
+function ApprovalCard({
+  item, onDecide,
+}: {
+  item: Extract<Item, { kind: "approval" }>;
+  onDecide: (id: string, ok: boolean) => void;
+}) {
+  const decided = item.status !== "pending";
+  return (
+    <div className="flex justify-start animate-floatUp">
+      <div className="max-w-[88%] w-full rounded-2xl border border-amber-500/30 bg-amber-500/[0.06] p-4">
+        <div className="flex items-center gap-2 text-amber-300 text-xs font-medium uppercase tracking-wide">
+          <span>🔐</span> Approval needed
+        </div>
+        <p className="text-slate-100 text-sm mt-1.5">{item.summary}</p>
+
+        {!decided ? (
+          <div className="flex gap-2 mt-3">
+            <button onClick={() => onDecide(item.id, true)} className="btn-primary !py-1.5 text-sm flex-1">
+              Approve
+            </button>
+            <button
+              onClick={() => onDecide(item.id, false)}
+              className="btn-ghost !py-1.5 text-sm flex-1"
+            >
+              Decline
+            </button>
+          </div>
+        ) : (
+          <div className="mt-2 text-xs">
+            {item.status === "declined" && <span className="text-slate-400">Declined.</span>}
+            {item.status === "approved" && <span className="text-slate-400">Approved — running…</span>}
+            {item.status === "done" && <span className="text-emerald-300">✓ Done.</span>}
+            {item.status === "error" && <span className="text-pink-300">✕ {item.detail || "Failed."}</span>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0M12 17v5" />
+    </svg>
+  );
+}
+function WaveIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M3 12h2M8 8v8M12 4v16M16 8v8M19 12h2" />
+    </svg>
+  );
+}
+function SendIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" />
+    </svg>
   );
 }
