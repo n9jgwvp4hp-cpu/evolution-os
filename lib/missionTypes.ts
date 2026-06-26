@@ -44,6 +44,7 @@ export type Mission = {
   pending: PendingCall[]; // tool calls in the current turn awaiting approval
   result?: string;
   qcLeft: number; // remaining quality-control revision passes
+  acknowledged?: boolean; // user has seen the completed result (durable, server-side)
   createdAt: number;
   updatedAt: number;
 };

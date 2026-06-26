@@ -51,3 +51,14 @@ export async function approveMission(id: string, approved: boolean) {
     });
   } catch { /* will retry on next user action */ }
 }
+
+/** Mark a completed mission as seen — durable + cross-device (not a local hide). */
+export async function acknowledgeMission(id: string) {
+  try {
+    await fetch(`/api/missions/${id}/ack`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ acknowledged: true }),
+    });
+  } catch { /* will retry on next poll */ }
+}

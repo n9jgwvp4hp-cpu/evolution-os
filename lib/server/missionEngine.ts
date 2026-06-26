@@ -58,11 +58,24 @@ export async function createMission(objective: string): Promise<Mission> {
     api: [{ role: "user", content: objective }],
     pending: [],
     qcLeft: 2,
+    acknowledged: false,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
   await mutate((db) => db.missions.unshift(m));
   return m;
+}
+
+/** Mark a completed mission as seen — durable, so results are never lost and
+ *  "results waiting" is consistent across devices and restarts. */
+export async function setMissionAcknowledged(id: string, acknowledged: boolean) {
+  await mutate((db) => {
+    const m = db.missions.find((x) => x.id === id);
+    if (m) {
+      m.acknowledged = acknowledged;
+      m.updatedAt = Date.now();
+    }
+  });
 }
 
 /* ---- model calls ---- */
@@ -75,14 +88,17 @@ async function callModel(messages: MissionApiMsg[], opts: { tools?: boolean; jso
   }
   if (opts.json) body.response_format = { type: "json_object" };
 
-  // one retry on transient failure
+  // one retry on transient failure; hard timeout so a turn can never hang
   let lastErr = "";
   for (let attempt = 0; attempt < 2; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90_000);
     try {
       const res = await fetch(OPENAI_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key()}` },
         body: JSON.stringify(body),
+        signal: ctrl.signal,
       });
       if (!res.ok) {
         lastErr = (await res.text().catch(() => "")) || `HTTP ${res.status}`;
@@ -92,7 +108,9 @@ async function callModel(messages: MissionApiMsg[], opts: { tools?: boolean; jso
       const data = await res.json();
       return data.choices?.[0]?.message ?? { role: "assistant", content: "" };
     } catch (e: any) {
-      lastErr = e?.message || "network error";
+      lastErr = e?.name === "AbortError" ? "model call timed out" : e?.message || "network error";
+    } finally {
+      clearTimeout(timer);
     }
   }
   throw new Error("Model call failed: " + lastErr.slice(0, 200));
@@ -343,6 +361,7 @@ export async function approveMission(id: string, approved: boolean) {
 /* ---- background worker ---- */
 let workerStarted = false;
 const inflight = new Set<string>();
+const MAX_CONCURRENT = 3; // bound fan-out so missions don't stampede the model API
 
 export function startWorker() {
   if (workerStarted) return;
@@ -351,16 +370,25 @@ export function startWorker() {
   if (process.env.DISABLE_WORKER === "true") return;
   workerStarted = true;
 
+  const claim = (id: string) => {
+    inflight.add(id);
+    runMission(id)
+      .catch(() => {}) // never let a rejection escape the worker
+      .finally(() => inflight.delete(id));
+  };
+
   const tick = async () => {
     try {
       const missions = await listMissions();
-      for (const m of missions) {
+      // Newly queued work, plus any mission left "running" that isn't currently
+      // being worked in this process — i.e. resume immediately after a restart.
+      // The inflight set prevents double-running; the idempotency guard makes
+      // resuming a half-done turn safe.
+      const candidates = missions.filter((m) => m.status === "queued" || m.status === "running");
+      for (const m of candidates) {
+        if (inflight.size >= MAX_CONCURRENT) break;
         if (inflight.has(m.id)) continue;
-        // Pick up newly queued work, and resume anything left "running" by a restart.
-        if (m.status === "queued" || m.status === "running") {
-          inflight.add(m.id);
-          runMission(m.id).finally(() => inflight.delete(m.id));
-        }
+        claim(m.id);
       }
     } catch {
       /* keep the worker alive no matter what */

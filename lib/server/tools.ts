@@ -145,10 +145,13 @@ export const SERVER_TOOLS: ServerTool[] = [
     async execute(a) {
       const url = String(a.url || "");
       if (!/^https?:\/\//i.test(url)) return { ok: false, error: "Invalid URL." };
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 20_000);
       try {
         const res = await fetch(url, {
           headers: { "User-Agent": "EvolutionOS/1.0 (+mission)" },
           redirect: "follow",
+          signal: ctrl.signal,
         });
         if (!res.ok) return { ok: false, error: `Fetch failed (${res.status}).` };
         const html = await res.text();
@@ -161,7 +164,9 @@ export const SERVER_TOOLS: ServerTool[] = [
           .trim();
         return { ok: true, url, text: text.slice(0, 6000) };
       } catch (e: any) {
-        return { ok: false, error: e?.message || "Could not reach the URL." };
+        return { ok: false, error: e?.name === "AbortError" ? "Timed out fetching the URL." : e?.message || "Could not reach the URL." };
+      } finally {
+        clearTimeout(timer);
       }
     },
   },

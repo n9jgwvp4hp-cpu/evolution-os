@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { uid } from "@/lib/store";
 import { getTool, toolSchemas } from "@/lib/tools";
 import { useSpeechRecognition, speak, stopSpeaking } from "@/lib/voice";
-import { useServerMissions, approveMission } from "@/lib/missionsClient";
+import { useServerMissions, approveMission, acknowledgeMission } from "@/lib/missionsClient";
 import MissionPanel from "@/components/MissionPanel";
 
 function notify(title: string, body: string) {
@@ -56,10 +56,12 @@ export default function EvolutionOS() {
   const apiRef = useRef<ApiMsg[]>([]);
   const approvals = useRef<Record<string, (ok: boolean) => void>>({});
 
-  // Background missions (executed + persisted on the server; we just watch)
+  // Background missions (executed + persisted on the server; we just watch).
+  // "Results waiting" = anything not yet acknowledged. Acknowledgement is
+  // durable + server-side, so a completed mission stays in the record and is
+  // surfaced on return from ANY device until it's been seen.
   const allMissions = useServerMissions();
-  const [dismissed, setDismissed] = useState<string[]>([]);
-  const missions = allMissions.filter((m) => !dismissed.includes(m.id));
+  const missions = allMissions.filter((m) => !m.acknowledged);
   const missionStatus = useRef<Record<string, string>>({});
   const seeded = useRef(false);
 
@@ -297,7 +299,7 @@ export default function EvolutionOS() {
           <MissionPanel
             missions={missions}
             onApprove={approveMission}
-            onDismiss={(id) => setDismissed((d) => [...d, id])}
+            onDismiss={acknowledgeMission}
           />
           {empty ? (
             <Hero

@@ -15,6 +15,17 @@ export type SearchResult = { title: string; url: string; snippet: string };
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
 
+/** fetch with a hard timeout so a slow provider can never hang a mission. */
+async function fetchT(url: string | URL, init: RequestInit = {}, ms = 15_000): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function strip(html: string): string {
   return html
     .replace(/<[^>]+>/g, "")
@@ -37,7 +48,7 @@ async function braveSearch(query: string, count: number): Promise<SearchResult[]
   const url = new URL("https://api.search.brave.com/res/v1/web/search");
   url.searchParams.set("q", query);
   url.searchParams.set("count", String(Math.min(count, 20)));
-  const res = await fetch(url, {
+  const res = await fetchT(url, {
     headers: { Accept: "application/json", "X-Subscription-Token": process.env.BRAVE_SEARCH_API_KEY! },
   });
   if (!res.ok) throw new Error(`Brave search failed (${res.status}).`);
@@ -55,7 +66,7 @@ async function serpapiSearch(query: string, count: number): Promise<SearchResult
   url.searchParams.set("engine", "google");
   url.searchParams.set("num", String(Math.min(count, 20)));
   url.searchParams.set("api_key", process.env.SERPAPI_KEY!);
-  const res = await fetch(url);
+  const res = await fetchT(url);
   if (!res.ok) throw new Error(`SerpAPI failed (${res.status}).`);
   const data = await res.json();
   return (data.organic_results ?? []).slice(0, count).map((r: any) => ({
@@ -67,7 +78,7 @@ async function serpapiSearch(query: string, count: number): Promise<SearchResult
 
 /** Keyless fallback: scrape DuckDuckGo's HTML endpoint. */
 async function duckSearch(query: string, count: number): Promise<SearchResult[]> {
-  const res = await fetch("https://html.duckduckgo.com/html/", {
+  const res = await fetchT("https://html.duckduckgo.com/html/", {
     method: "POST",
     headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ q: query }),
