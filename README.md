@@ -43,10 +43,12 @@ Missions don't live in the browser — they run on the **backend** and persist:
   was actually done and sends it back to revise if a claim isn't supported —
   Evolution won't tell you it did something it didn't.
 
-Architecture: a file-backed store (`lib/server/db.ts`, swappable for Postgres),
-a server tool layer (`lib/server/tools.ts`), the mission engine
-(`lib/server/missionEngine.ts`), and a worker started on boot
-(`instrumentation.ts`). The client only watches via `/api/missions`.
+Architecture: a dual-backend store (`lib/server/db.ts`) — Postgres in
+production (`DATABASE_URL`), a JSON file in local dev — a server tool layer
+(`lib/server/tools.ts`), the mission engine (`lib/server/missionEngine.ts`),
+and an in-process worker that starts on first request. The client only watches
+via `/api/missions`. Production deploy: see [DEPLOYMENT.md](DEPLOYMENT.md)
+(DigitalOcean App Platform + Managed Postgres).
 
 ## One brain
 Memory, tasks, contacts, deals, and notes live in a single server-side store

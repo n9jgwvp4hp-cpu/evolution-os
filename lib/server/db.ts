@@ -1,19 +1,21 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { Pool, type PoolClient } from "pg";
 import type { Mission } from "@/lib/missionTypes";
 import type { Task, Contact, Deal, Note, Memory } from "@/lib/types";
 
 /**
  * Evolution OS persistence — the server's durable source of truth.
  *
- * A small file-backed store under `.data/`. Every read/write goes to disk so
- * that all server contexts share one consistent view: the background worker
- * (started from instrumentation.ts) and the API route handlers run in separate
- * module graphs, so an in-memory cache would diverge — the file is the truth.
- * Writes are serialized and atomic (temp file + rename).
+ * Two interchangeable backends behind ONE interface (read / mutate):
+ *   • Postgres  — used when DATABASE_URL is set (production / DigitalOcean).
+ *     The whole brain is a single JSONB row; mutate() runs in a transaction
+ *     with SELECT … FOR UPDATE so writes are atomic and serialized even across
+ *     multiple processes/instances.
+ *   • File      — used in local dev (no DATABASE_URL): a JSON file under .data/.
  *
- * Intentionally swappable: the same interface can be backed by Postgres when
- * Evolution is deployed for 24/7 always-on execution.
+ * Everything above this file (data service, mission engine, API routes) is
+ * unchanged regardless of backend.
  */
 
 export type Shape = {
@@ -25,43 +27,119 @@ export type Shape = {
   deals: Deal[];
 };
 
+const empty: Shape = { missions: [], memories: [], notes: [], tasks: [], contacts: [], deals: [] };
+const merge = (state: any): Shape => ({ ...empty, ...(state || {}) });
+
+const DATABASE_URL = process.env.DATABASE_URL || "";
+const USE_PG = Boolean(DATABASE_URL);
+export const dbBackend = () => (USE_PG ? "postgres" : "file");
+
+/* ===================== Postgres backend ===================== */
+let pool: Pool | null = null;
+let schemaReady: Promise<void> | null = null;
+
+function getPool(): Pool {
+  if (!pool) {
+    const local = /@(localhost|127\.0\.0\.1)/.test(DATABASE_URL);
+    pool = new Pool({
+      connectionString: DATABASE_URL,
+      // DigitalOcean Managed Postgres requires TLS; the platform terminates it.
+      ssl: local ? false : { rejectUnauthorized: false },
+      max: 5,
+    });
+  }
+  return pool;
+}
+
+function ensureSchema(): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = (async () => {
+      const p = getPool();
+      await p.query(
+        `CREATE TABLE IF NOT EXISTS evolution_state (
+           id INT PRIMARY KEY,
+           state JSONB NOT NULL,
+           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+         )`
+      );
+      await p.query(
+        `INSERT INTO evolution_state (id, state) VALUES (1, $1)
+         ON CONFLICT (id) DO NOTHING`,
+        [JSON.stringify(empty)]
+      );
+    })().catch((e) => {
+      schemaReady = null; // allow retry on next call
+      throw e;
+    });
+  }
+  return schemaReady;
+}
+
+async function pgRead<T>(fn: (db: Shape) => T): Promise<T> {
+  await ensureSchema();
+  const { rows } = await getPool().query("SELECT state FROM evolution_state WHERE id = 1");
+  return fn(merge(rows[0]?.state));
+}
+
+async function pgMutate<T>(fn: (db: Shape) => T): Promise<T> {
+  await ensureSchema();
+  const client: PoolClient = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query("SELECT state FROM evolution_state WHERE id = 1 FOR UPDATE");
+    const db = merge(rows[0]?.state);
+    const result = fn(db);
+    await client.query("UPDATE evolution_state SET state = $1, updated_at = now() WHERE id = 1", [
+      JSON.stringify(db),
+    ]);
+    await client.query("COMMIT");
+    return result;
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/* ======================= File backend ======================= */
 const DATA_DIR = path.join(process.cwd(), ".data");
 const FILE = path.join(DATA_DIR, "evolution.json");
-const empty: Shape = { missions: [], memories: [], notes: [], tasks: [], contacts: [], deals: [] };
-
 let writeChain: Promise<void> = Promise.resolve();
 
-async function loadRaw(): Promise<Shape> {
+async function loadFile(): Promise<Shape> {
   try {
-    const raw = await fs.readFile(FILE, "utf8");
-    return { ...empty, ...JSON.parse(raw) };
+    return merge(JSON.parse(await fs.readFile(FILE, "utf8")));
   } catch {
     return structuredClone(empty);
   }
 }
-
-async function saveRaw(db: Shape): Promise<void> {
+async function saveFile(db: Shape): Promise<void> {
   await fs.mkdir(DATA_DIR, { recursive: true });
   const tmp = `${FILE}.${process.pid}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(db, null, 2), "utf8");
   await fs.rename(tmp, FILE);
 }
-
-/** Read a fresh snapshot from disk. */
-export async function read<T>(fn: (db: Shape) => T): Promise<T> {
-  return fn(await loadRaw());
+async function fileRead<T>(fn: (db: Shape) => T): Promise<T> {
+  return fn(await loadFile());
 }
-
-/** Serialized read-modify-write against the file. */
-export async function mutate<T>(fn: (db: Shape) => T): Promise<T> {
+async function fileMutate<T>(fn: (db: Shape) => T): Promise<T> {
   let result!: T;
   writeChain = writeChain.then(async () => {
-    const db = await loadRaw();
+    const db = await loadFile();
     result = fn(db);
-    await saveRaw(db);
+    await saveFile(db);
   });
   await writeChain;
   return result;
+}
+
+/* ===================== Public interface ===================== */
+export async function read<T>(fn: (db: Shape) => T): Promise<T> {
+  return USE_PG ? pgRead(fn) : fileRead(fn);
+}
+export async function mutate<T>(fn: (db: Shape) => T): Promise<T> {
+  return USE_PG ? pgMutate(fn) : fileMutate(fn);
 }
 
 export function uid(): string {

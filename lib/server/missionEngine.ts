@@ -1,4 +1,4 @@
-import { mutate, getMission, listMissions, uid } from "@/lib/server/db";
+import { mutate, getMission, listMissions, uid, dbBackend } from "@/lib/server/db";
 import { getServerTool, serverToolSchemas } from "@/lib/server/tools";
 import { buildBrainContext } from "@/lib/server/data";
 import type { Mission, MissionStep, MissionApiMsg } from "@/lib/missionTypes";
@@ -274,6 +274,9 @@ const inflight = new Set<string>();
 
 export function startWorker() {
   if (workerStarted) return;
+  // Allow a deployment to disable the in-process worker (e.g. when running a
+  // dedicated worker component). Default: enabled.
+  if (process.env.DISABLE_WORKER === "true") return;
   workerStarted = true;
 
   const tick = async () => {
@@ -295,5 +298,5 @@ export function startWorker() {
   setInterval(tick, 2000);
   tick();
   // eslint-disable-next-line no-console
-  console.log("[Evolution OS] mission worker started");
+  console.log(`[Evolution OS] mission worker started (store: ${dbBackend()})`);
 }

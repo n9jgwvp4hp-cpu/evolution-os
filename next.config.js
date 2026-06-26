@@ -2,8 +2,9 @@
 const nextConfig = {
   reactStrictMode: true,
   experimental: {
-    // Run instrumentation.ts on server start so the mission worker boots.
-    instrumentationHook: true,
+    // Don't bundle the Postgres driver — load it as a native Node module at
+    // runtime (it uses fs/path/net and can't be webpacked).
+    serverComponentsExternalPackages: ["pg"],
   },
 };
 
