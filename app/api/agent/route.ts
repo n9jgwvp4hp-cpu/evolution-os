@@ -58,6 +58,8 @@ export async function POST(req: NextRequest) {
     "- For a BIG or multi-step objective (research, drafting then sending, several operations, " +
     "anything that runs for a while), call start_mission with a clear objective and tell the user " +
     "in one short line that you've started and will report back. Don't try to do huge work inline.\n" +
+    "- For a TIME-BASED or RECURRING objective ('in 2 hours', 'tomorrow morning', 'every week'), call " +
+    "schedule_mission with delayMinutes and/or everyMinutes. The always-on server runs it on time.\n" +
     "- Sensitive actions (sending email, creating calendar events) are auto-gated with a user approval " +
     "prompt — just call them when appropriate; don't ask permission in text first. If a result says " +
     "the user declined, accept it gracefully.\n" +

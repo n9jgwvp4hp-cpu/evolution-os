@@ -171,6 +171,47 @@ export const TOOLS: Tool[] = [
       return { ok: true, started: true, missionId: data.id, note: "Mission queued on the server; it runs in the background and the result will be waiting." };
     },
   },
+  {
+    name: "schedule_mission",
+    description:
+      "Schedule a MISSION to run later and/or on a repeating interval, executed by the always-on server. " +
+      "Use for time-based or recurring objectives ('in 2 hours', 'every morning', 'each week'). " +
+      "delayMinutes = how long from now the first run starts (0 = now). everyMinutes = repeat interval " +
+      "(omit for one-time; 1440 = daily, 10080 = weekly). After calling, confirm in one short line when " +
+      "it will run and whether it repeats.",
+    parameters: obj(
+      {
+        objective: str("A clear, self-contained description of the goal"),
+        delayMinutes: num("Minutes from now until the first run (0 = immediately)"),
+        everyMinutes: num("Repeat interval in minutes (omit or 0 for a one-time mission)"),
+      },
+      ["objective"]
+    ),
+    summarize: (a) =>
+      `Schedule: ${a.objective}` +
+      (a.delayMinutes ? ` (in ${a.delayMinutes}m)` : "") +
+      (a.everyMinutes ? ` every ${a.everyMinutes}m` : ""),
+    async execute(a) {
+      const res = await fetch("/api/missions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          objective: String(a.objective),
+          delayMinutes: Number(a.delayMinutes) || 0,
+          everyMinutes: Number(a.everyMinutes) || 0,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data.error || "Could not schedule mission." };
+      return {
+        ok: true,
+        scheduled: true,
+        missionId: data.id,
+        scheduledFor: data.scheduledFor,
+        recurring: Boolean(a.everyMinutes),
+      };
+    },
+  },
 
   /* ----------------------------------------------------------------------
    * FUTURE CAPABILITY DOMAINS — add here and they work in both modes:

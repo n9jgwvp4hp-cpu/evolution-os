@@ -56,7 +56,7 @@ function MissionCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-[10px] uppercase tracking-widest text-slate-500">Mission</span>
-            <span className="text-[10px]">{label(m.status)}</span>
+            <span className="text-[10px]">{label(m)}</span>
           </div>
           <p className="text-sm text-slate-100 leading-snug mt-0.5">{m.objective}</p>
 
@@ -131,17 +131,22 @@ function StatusDot({ status }: { status: Mission["status"] }) {
     return <span className="mt-1 w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulseGlow shrink-0" />;
   if (status === "done")
     return <span className="mt-1 w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0" />;
+  if (status === "queued")
+    return <span className="mt-1 w-2.5 h-2.5 rounded-full bg-slate-400 shrink-0" />;
   return <span className="mt-1 w-2.5 h-2.5 rounded-full bg-pink-400 shrink-0" />;
 }
 
-function label(status: Mission["status"]) {
-  return status === "running"
-    ? "🛰️ working…"
-    : status === "needs_approval"
-    ? "⏸️ needs you"
-    : status === "done"
-    ? "✓ complete"
-    : "✕ failed";
+function label(m: Mission) {
+  const status = m.status;
+  if (status === "running") return "🛰️ working…";
+  if (status === "needs_approval") return "⏸️ needs you";
+  if (status === "done") return "✓ complete";
+  if (status === "failed") return "✕ failed";
+  // queued
+  if (m.scheduledFor && m.scheduledFor > Date.now()) {
+    return `🕑 scheduled · ${new Date(m.scheduledFor).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+  }
+  return "• queued";
 }
 function stepIcon(kind: string) {
   return kind === "action" ? "→" : kind === "result" ? "✓" : kind === "error" ? "✕" : "·";

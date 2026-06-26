@@ -45,6 +45,8 @@ export type Mission = {
   result?: string;
   qcLeft: number; // remaining quality-control revision passes
   acknowledged?: boolean; // user has seen the completed result (durable, server-side)
+  scheduledFor?: number; // epoch ms; the worker won't start it until due (undefined = now)
+  recurrence?: { everyMs: number }; // if set, a fresh run is queued after each completion
   createdAt: number;
   updatedAt: number;
 };

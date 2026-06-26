@@ -49,16 +49,29 @@ async function pushApi(id: string, msg: MissionApiMsg) {
   });
 }
 
-export async function createMission(objective: string): Promise<Mission> {
+export async function createMission(
+  objective: string,
+  opts: { scheduledFor?: number; recurrence?: { everyMs: number } } = {}
+): Promise<Mission> {
+  const scheduled = opts.scheduledFor && opts.scheduledFor > Date.now() ? opts.scheduledFor : undefined;
   const m: Mission = {
     id: uid(),
     objective,
     status: "queued",
-    steps: [{ id: uid(), ts: Date.now(), kind: "plan", text: "Mission accepted" }],
+    steps: [
+      {
+        id: uid(),
+        ts: Date.now(),
+        kind: "plan",
+        text: scheduled ? `Scheduled for ${new Date(scheduled).toISOString()}` : "Mission accepted",
+      },
+    ],
     api: [{ role: "user", content: objective }],
     pending: [],
     qcLeft: 2,
     acknowledged: false,
+    scheduledFor: scheduled,
+    recurrence: opts.recurrence,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -307,6 +320,14 @@ async function finalize(id: string, candidate: string) {
 
   await addStep(id, { kind: "result", text: report });
   await patch(id, { status: "done", result: report, pending: [] });
+
+  // Recurring missions queue their next run.
+  if (m.recurrence?.everyMs) {
+    await createMission(m.objective, {
+      scheduledFor: Date.now() + m.recurrence.everyMs,
+      recurrence: m.recurrence,
+    });
+  }
 }
 
 /* ---- the main loop ---- */
@@ -390,7 +411,12 @@ export function startWorker() {
       // being worked in this process — i.e. resume immediately after a restart.
       // The inflight set prevents double-running; the idempotency guard makes
       // resuming a half-done turn safe.
-      const candidates = missions.filter((m) => m.status === "queued" || m.status === "running");
+      const now = Date.now();
+      const candidates = missions.filter(
+        (m) =>
+          (m.status === "queued" && (!m.scheduledFor || m.scheduledFor <= now)) ||
+          m.status === "running"
+      );
       for (const m of candidates) {
         if (inflight.size >= MAX_CONCURRENT) break;
         if (inflight.has(m.id)) continue;
