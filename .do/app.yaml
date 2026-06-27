@@ -18,10 +18,11 @@ services:
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-1gb
     http_port: 3000
-    github:
-      repo: n9jgwvp4hp-cpu/evolution-os
+    # Public repo → git source needs no DigitalOcean↔GitHub connection.
+    # (Switch to a `github:` block later if you want auto-deploy on push.)
+    git:
+      repo_clone_url: https://github.com/n9jgwvp4hp-cpu/evolution-os.git
       branch: feature/personal-ai-assistant
-      deploy_on_push: true
     build_command: npm run build
     run_command: npm start
     health_check:
