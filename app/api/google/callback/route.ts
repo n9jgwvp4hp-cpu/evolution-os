@@ -12,18 +12,18 @@ export async function GET(req: NextRequest) {
   const origin = url.origin;
 
   if (error) {
-    return NextResponse.redirect(`${origin}/settings?google=denied`);
+    return NextResponse.redirect(`${origin}/connections?google=denied`);
   }
   if (!code) {
-    return NextResponse.redirect(`${origin}/settings?google=missing_code`);
+    return NextResponse.redirect(`${origin}/connections?google=missing_code`);
   }
 
   try {
     const tokens = await exchangeCode(code);
     writeTokens(tokens); // cookie — Conversation Mode
     await saveGoogleTokens(tokens); // brain — lets background missions act too
-    return NextResponse.redirect(`${origin}/settings?google=connected`);
+    return NextResponse.redirect(`${origin}/connections?google=connected`);
   } catch {
-    return NextResponse.redirect(`${origin}/settings?google=failed`);
+    return NextResponse.redirect(`${origin}/connections?google=failed`);
   }
 }

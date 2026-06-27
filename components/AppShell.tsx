@@ -24,7 +24,8 @@ const MODULES: Item[] = [
   { href: "/calendar", label: "Calendar", hint: "Schedule", icon: <IconCal /> },
   { href: "/notes", label: "Notes", hint: "Saved writing", icon: <IconNote /> },
   { href: "/files", label: "Files", hint: "Documents", icon: <IconFile /> },
-  { href: "/settings", label: "Settings", hint: "Keys & connections", icon: <IconGear /> },
+  { href: "/connections", label: "Connections", hint: "Gmail & Calendar", icon: <IconLink /> },
+  { href: "/settings", label: "Settings", hint: "Keys & model", icon: <IconGear /> },
 ];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -122,6 +123,7 @@ function svg(children: React.ReactNode) {
     </svg>
   );
 }
+function IconLink() { return svg(<><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" /><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" /></>); }
 function IconMenu() { return svg(<path d="M4 6h16M4 12h16M4 18h16" />); }
 function IconClose() { return svg(<path d="M18 6 6 18M6 6l12 12" />); }
 function IconSpark() { return svg(<><path d="M12 3v4M12 17v4M3 12h4M17 12h4" /><path d="M12 8a4 4 0 0 0 4 4 4 4 0 0 0-4 4 4 4 0 0 0-4-4 4 4 0 0 0 4-4z" /></>); }
