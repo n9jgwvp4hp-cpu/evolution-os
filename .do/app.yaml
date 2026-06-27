@@ -29,15 +29,22 @@ services:
       http_path: /api/health
       initial_delay_seconds: 25
       period_seconds: 15
+    # ⚠️  SECRETS ARE NOT IN THIS FILE. The app reads them from the platform env
+    #     (process.env.OPENAI_API_KEY etc.). Set/rotate them with:
+    #         bash set-openai-key.sh        (OpenAI key, hidden prompt)
+    #     or the DigitalOcean dashboard → web → Environment Variables.
+    #
+    # ⚠️  DO NOT run `doctl apps update --spec .do/app.yaml` against the LIVE app:
+    #     applying this file would DROP the secrets set on the platform and break
+    #     production. This spec is a reference for the INITIAL `apps create` only;
+    #     add OPENAI_API_KEY (and any Google keys) as encrypted secrets right
+    #     after creating the app.
     envs:
       - { key: NODE_ENV, value: production }
-      - { key: OPENAI_API_KEY, scope: RUN_AND_BUILD_TIME, type: SECRET, value: REPLACE_IN_DASHBOARD }
       - { key: OPENAI_MODEL, value: gpt-4o-mini }
       - { key: DATABASE_URL, scope: RUN_AND_BUILD_TIME, type: SECRET, value: "${evolution-db.DATABASE_URL}" }
-      # Optional — only if you want missions to send Gmail / create Calendar events:
-      # - { key: GOOGLE_CLIENT_ID, scope: RUN_AND_BUILD_TIME, type: SECRET, value: REPLACE_IN_DASHBOARD }
-      # - { key: GOOGLE_CLIENT_SECRET, scope: RUN_AND_BUILD_TIME, type: SECRET, value: REPLACE_IN_DASHBOARD }
-      # - { key: GOOGLE_REDIRECT_URI, value: "https://<YOUR_APP_DOMAIN>/api/google/callback" }
+      # OPENAI_API_KEY  → set on the platform (see warning above), never committed.
+      # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI → same, optional.
 
 databases:
   - name: evolution-db
