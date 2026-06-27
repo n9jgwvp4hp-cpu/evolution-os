@@ -1,14 +1,14 @@
-# DigitalOcean App Platform spec for Evolution OS
+# DigitalOcean App Platform spec for Evolution OS — FASTEST live path.
 # ------------------------------------------------------------------
-# Two-component, always-on architecture:
-#   • web    — stateless Next.js (UI + API). Its in-process worker is DISABLED.
-#   • worker — dedicated always-on process that executes missions 24/7,
-#              independent of web traffic and of every user device.
-# Both share one Managed PostgreSQL brain.
+# One web service (with its in-process mission worker) + Managed Postgres.
+# The web service's health check keeps the worker alive, so missions run even
+# with no app open. instance_count MUST stay 1 (single worker).
 #
-# Apply with: doctl apps create --spec .do/app.yaml
-# Replace <YOUR_GITHUB_REPO> and (after first deploy) <YOUR_APP_DOMAIN>.
-# Set the SECRET values in the dashboard.
+# (The dedicated web+worker split for higher scale is documented in
+#  ARCHITECTURE.md — a later upgrade, not needed to go live.)
+#
+# Deploy: doctl apps create --spec .do/app.yaml
+# Set OPENAI_API_KEY (and optional Google keys) as encrypted secrets.
 # ------------------------------------------------------------------
 name: evolution-os
 region: nyc
@@ -19,49 +19,27 @@ services:
     instance_size_slug: apps-s-1vcpu-1gb
     http_port: 3000
     github:
-      repo: <YOUR_GITHUB_REPO>
-      branch: main
+      repo: n9jgwvp4hp-cpu/evolution-os
+      branch: feature/personal-ai-assistant
       deploy_on_push: true
     build_command: npm run build
     run_command: npm start
     health_check:
       http_path: /api/health
-      initial_delay_seconds: 20
+      initial_delay_seconds: 25
       period_seconds: 15
     envs:
       - { key: NODE_ENV, value: production }
-      - { key: DISABLE_WORKER, value: "true" } # web does NOT execute missions
       - { key: OPENAI_API_KEY, scope: RUN_AND_BUILD_TIME, type: SECRET, value: REPLACE_IN_DASHBOARD }
       - { key: OPENAI_MODEL, value: gpt-4o-mini }
       - { key: DATABASE_URL, scope: RUN_AND_BUILD_TIME, type: SECRET, value: "${evolution-db.DATABASE_URL}" }
-      - { key: GOOGLE_CLIENT_ID, scope: RUN_AND_BUILD_TIME, type: SECRET, value: REPLACE_IN_DASHBOARD }
-      - { key: GOOGLE_CLIENT_SECRET, scope: RUN_AND_BUILD_TIME, type: SECRET, value: REPLACE_IN_DASHBOARD }
-      - { key: GOOGLE_REDIRECT_URI, value: "https://<YOUR_APP_DOMAIN>/api/google/callback" }
-
-workers:
-  - name: worker
-    instance_count: 1 # singleton today; scale out via DB claim queue (see ARCHITECTURE.md Phase 3)
-    instance_size_slug: apps-s-1vcpu-1gb
-    github:
-      repo: <YOUR_GITHUB_REPO>
-      branch: main
-      deploy_on_push: true
-    # No Next build needed for the worker — just install deps and run it.
-    build_command: "true"
-    run_command: npm run worker
-    envs:
-      - { key: NODE_ENV, value: production }
-      - { key: OPENAI_API_KEY, scope: RUN_TIME, type: SECRET, value: REPLACE_IN_DASHBOARD }
-      - { key: OPENAI_MODEL, value: gpt-4o-mini }
-      - { key: DATABASE_URL, scope: RUN_TIME, type: SECRET, value: "${evolution-db.DATABASE_URL}" }
-      # Google creds let background missions send mail / create events too.
-      - { key: GOOGLE_CLIENT_ID, scope: RUN_TIME, type: SECRET, value: REPLACE_IN_DASHBOARD }
-      - { key: GOOGLE_CLIENT_SECRET, scope: RUN_TIME, type: SECRET, value: REPLACE_IN_DASHBOARD }
-      # Optional: better research depth if you add a search key.
-      # - { key: BRAVE_SEARCH_API_KEY, scope: RUN_TIME, type: SECRET, value: REPLACE_IN_DASHBOARD }
+      # Optional — only if you want missions to send Gmail / create Calendar events:
+      # - { key: GOOGLE_CLIENT_ID, scope: RUN_AND_BUILD_TIME, type: SECRET, value: REPLACE_IN_DASHBOARD }
+      # - { key: GOOGLE_CLIENT_SECRET, scope: RUN_AND_BUILD_TIME, type: SECRET, value: REPLACE_IN_DASHBOARD }
+      # - { key: GOOGLE_REDIRECT_URI, value: "https://<YOUR_APP_DOMAIN>/api/google/callback" }
 
 databases:
   - name: evolution-db
     engine: PG
     version: "16"
-    production: true # HA-capable; enable a standby node for automatic failover
+    production: false # smallest managed DB to start; resize anytime

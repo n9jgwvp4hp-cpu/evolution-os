@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { read, getWorkerHeartbeat, dbBackend } from "@/lib/server/db";
+import { startWorker } from "@/lib/server/missionEngine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,9 @@ export const dynamic = "force-dynamic";
  * (which may run as a separate component) is beating.
  */
 export async function GET() {
+  // The platform pings this every ~15s; use it to keep the in-process worker
+  // alive on single-component deploys (idempotent; a no-op when DISABLE_WORKER).
+  startWorker();
   const beat = await getWorkerHeartbeat();
   const ageMs = beat ? Date.now() - beat : null;
   const counts = await read((db) => {
