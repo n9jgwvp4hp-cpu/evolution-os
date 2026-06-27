@@ -58,12 +58,29 @@ export const dbBackend = () => (USE_PG ? "postgres" : "file");
 let pool: Pool | null = null;
 let schemaReady: Promise<void> | null = null;
 
+/**
+ * Strip `sslmode` from the connection string. node-postgres parses `sslmode`
+ * out of the URL and uses it to build its OWN ssl config, which overrides the
+ * `ssl` option we pass — so DigitalOcean's self-signed CA chain fails
+ * verification. Removing it lets our explicit ssl config govern TLS.
+ */
+function stripSslmode(url: string): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.delete("sslmode");
+    return u.toString();
+  } catch {
+    return url.replace(/[?&]sslmode=[^&]*/gi, "").replace(/[?&]$/, "");
+  }
+}
+
 function getPool(): Pool {
   if (!pool) {
     const local = /@(localhost|127\.0\.0\.1)/.test(DATABASE_URL);
     pool = new Pool({
-      connectionString: DATABASE_URL,
-      // DigitalOcean Managed Postgres requires TLS; the platform terminates it.
+      connectionString: stripSslmode(DATABASE_URL),
+      // DigitalOcean Managed Postgres requires TLS but uses a self-signed CA
+      // chain; connect over TLS without chain verification.
       ssl: local ? false : { rejectUnauthorized: false },
       max: 5,
     });
