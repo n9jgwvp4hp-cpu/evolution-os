@@ -22,10 +22,12 @@ export default function ConnectionsPage() {
   useEffect(() => {
     setOrigin(window.location.origin);
     refresh();
-    const g = new URLSearchParams(window.location.search).get("google");
+    const params = new URLSearchParams(window.location.search);
+    const g = params.get("google");
+    const reason = params.get("reason");
     if (g === "connected") setNotice("✅ Google connected.");
     else if (g === "denied") setNotice("Connection was cancelled.");
-    else if (g) setNotice("❌ Google connection failed — check the OAuth client + redirect URI.");
+    else if (g) setNotice("❌ Google connection failed" + (reason ? `: ${decodeURIComponent(reason)}` : "."));
     if (g) window.history.replaceState({}, "", "/connections");
   }, []);
 
