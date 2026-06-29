@@ -1,14 +1,21 @@
-# DigitalOcean App Platform spec for Evolution OS — FASTEST live path.
+# DigitalOcean App Platform spec for Evolution OS — two-component (decoupled).
 # ------------------------------------------------------------------
-# One web service (with its in-process mission worker) + Managed Postgres.
-# The web service's health check keeps the worker alive, so missions run even
-# with no app open. instance_count MUST stay 1 (single worker).
+#   • web    — stateless Next.js (UI + API). DISABLE_WORKER=true: it does NOT
+#              execute missions.
+#   • worker — dedicated always-on process (`npm run worker` → worker.ts) that
+#              executes missions 24/7, independent of the web tier. A web
+#              deploy/restart never interrupts mission execution.
+# Both share one Managed PostgreSQL brain, so missions persist and survive
+# redeploys (a queued/running mission is resumed by the worker on boot).
 #
-# (The dedicated web+worker split for higher scale is documented in
-#  ARCHITECTURE.md — a later upgrade, not needed to go live.)
+# SECRETS (OPENAI_API_KEY, DATABASE_URL, GOOGLE_CLIENT_ID/SECRET, GOOGLE_REDIRECT_URI)
+# are set on the platform (encrypted), NOT in this file. App-level secrets are
+# inherited by every component; DATABASE_URL + OPENAI_API_KEY are also set on
+# the worker so it always reaches Postgres. Do NOT `doctl apps update --spec`
+# this file against the live app — it would drop those secrets.
 #
-# Deploy: doctl apps create --spec .do/app.yaml
-# Set OPENAI_API_KEY (and optional Google keys) as encrypted secrets.
+# Keep BOTH components at instance_count: 1 (single worker = no double-execution;
+# multi-worker would require the DB claim queue — see ARCHITECTURE.md Phase 3).
 # ------------------------------------------------------------------
 name: evolution-os
 region: nyc
@@ -18,8 +25,6 @@ services:
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-1gb
     http_port: 3000
-    # Public repo → git source needs no DigitalOcean↔GitHub connection.
-    # (Switch to a `github:` block later if you want auto-deploy on push.)
     git:
       repo_clone_url: https://github.com/n9jgwvp4hp-cpu/evolution-os.git
       branch: feature/personal-ai-assistant
@@ -29,25 +34,26 @@ services:
       http_path: /api/health
       initial_delay_seconds: 25
       period_seconds: 15
-    # ⚠️  SECRETS ARE NOT IN THIS FILE. The app reads them from the platform env
-    #     (process.env.OPENAI_API_KEY etc.). Set/rotate them with:
-    #         bash set-openai-key.sh        (OpenAI key, hidden prompt)
-    #     or the DigitalOcean dashboard → web → Environment Variables.
-    #
-    # ⚠️  DO NOT run `doctl apps update --spec .do/app.yaml` against the LIVE app:
-    #     applying this file would DROP the secrets set on the platform and break
-    #     production. This spec is a reference for the INITIAL `apps create` only;
-    #     add OPENAI_API_KEY (and any Google keys) as encrypted secrets right
-    #     after creating the app.
+    envs:
+      - { key: NODE_ENV, value: production }
+      - { key: DISABLE_WORKER, value: "true" } # web must NOT run the in-process worker
+      - { key: OPENAI_MODEL, value: gpt-4o-mini }
+      # OPENAI_API_KEY, DATABASE_URL, GOOGLE_* → platform secrets (encrypted).
+
+workers:
+  - name: worker
+    instance_count: 1 # singleton; scale-out needs the DB claim queue
+    instance_size_slug: apps-s-1vcpu-1gb
+    git:
+      repo_clone_url: https://github.com/n9jgwvp4hp-cpu/evolution-os.git
+      branch: feature/personal-ai-assistant
+    build_command: echo "worker: deps only, no Next build"
+    run_command: npm run worker
     envs:
       - { key: NODE_ENV, value: production }
       - { key: OPENAI_MODEL, value: gpt-4o-mini }
-      - { key: DATABASE_URL, scope: RUN_AND_BUILD_TIME, type: SECRET, value: "${evolution-db.DATABASE_URL}" }
-      # OPENAI_API_KEY  → set on the platform (see warning above), never committed.
-      # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI → same, optional.
+      # OPENAI_API_KEY + DATABASE_URL set as platform secrets on this component
+      # so the worker always reaches Postgres; GOOGLE_* inherited app-level.
 
-databases:
-  - name: evolution-db
-    engine: PG
-    version: "16"
-    production: false # smallest managed DB to start; resize anytime
+# Managed PostgreSQL is a standalone cluster (not inline); its connection
+# string is the DATABASE_URL secret above.
