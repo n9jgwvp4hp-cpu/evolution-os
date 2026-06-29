@@ -25,3 +25,7 @@ next-env.d.ts
 client_secret_*.json
 *client_secret*.json
 google-client*.json
+
+# local one-shot secret hand-off (never commit)
+evo-secret.txt
+**/evo-secret.txt
