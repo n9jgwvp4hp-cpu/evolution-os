@@ -16,10 +16,14 @@ export async function GET() {
   startWorker();
   const beat = await getWorkerHeartbeat();
   const ageMs = beat ? Date.now() - beat : null;
-  const counts = await read((db) => {
+  const { counts, storeBytes, apiMsgs } = await read((db) => {
     const c: Record<string, number> = {};
     for (const m of db.missions) c[m.status] = (c[m.status] || 0) + 1;
-    return c;
+    return {
+      counts: c,
+      storeBytes: JSON.stringify(db).length,
+      apiMsgs: db.missions.reduce((n, m) => n + (m.api?.length || 0), 0),
+    };
   });
   return NextResponse.json({
     ok: true,
@@ -30,6 +34,9 @@ export async function GET() {
       lastBeatMsAgo: ageMs,
     },
     missions: counts,
+    // Reliability instrumentation: store size + retained conversation messages.
+    storeKB: Math.round(storeBytes / 1024),
+    apiMsgs,
     time: Date.now(),
   });
 }

@@ -322,7 +322,9 @@ async function finalize(id: string, candidate: string) {
   }
 
   await addStep(id, { kind: "result", text: report });
-  await patch(id, { status: "done", result: report, pending: [] });
+  // Drop the heavy model-conversation history on completion. It's only needed
+  // for in-flight resume; keeping it bloats the store as missions accumulate.
+  await patch(id, { status: "done", result: report, pending: [], api: [] });
 
   // Recurring missions queue their next run — but re-read first, so a mission
   // canceled mid-run (recurrence cleared) does NOT spawn another occurrence.
@@ -399,7 +401,7 @@ export async function runMission(id: string) {
         scheduledFor: Date.now() + RETRY_DELAY_MS,
       });
     } else {
-      await patch(id, { status: "failed", attempts, result: msg });
+      await patch(id, { status: "failed", attempts, result: msg, api: [] });
     }
   }
 }
@@ -430,6 +432,16 @@ export async function approveMission(id: string, approved: boolean) {
   await patch(id, { status: "queued", scheduledFor: undefined, pendingDecision: approved });
 }
 
+/** One-time maintenance: drop conversation history from already-terminal
+ *  missions so the store doesn't carry historical bloat. Runs at worker boot. */
+async function trimTerminalApi() {
+  await mutate((db) => {
+    for (const m of db.missions) {
+      if ((m.status === "done" || m.status === "failed") && m.api.length) m.api = [];
+    }
+  });
+}
+
 /* ---- background worker ---- */
 let workerStarted = false;
 const inflight = new Set<string>();
@@ -441,6 +453,9 @@ export function startWorker() {
   // dedicated worker component). Default: enabled.
   if (process.env.DISABLE_WORKER === "true") return;
   workerStarted = true;
+
+  // Shrink any historical bloat once on boot (non-blocking).
+  trimTerminalApi().catch(() => {});
 
   const claim = (id: string) => {
     inflight.add(id);
