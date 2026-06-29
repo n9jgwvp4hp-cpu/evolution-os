@@ -10,11 +10,24 @@ APP=21dfe73b-1b88-4f85-b151-14bc047b49c6
 DOCTL="$HOME/bin/doctl"
 REDIRECT="https://evolution-os-dlfmv.ondigitalocean.app/api/google/callback"
 
-read -rs -p "Paste GOOGLE_CLIENT_ID (hidden), then Enter: " GCID; echo
-read -rs -p "Paste GOOGLE_CLIENT_SECRET (hidden), then Enter: " GSEC; echo
+# Two ways to provide credentials:
+#   bash set-google-creds.sh /path/to/client_secret_xxx.json   (recommended)
+#   bash set-google-creds.sh                                    (hidden prompts)
+if [ "${1:-}" != "" ]; then
+  JSON="$1"
+  [ -f "$JSON" ] || { echo "✗ File not found: $JSON"; exit 1; }
+  echo "Reading credentials from $JSON …"
+  GCID="$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));w=d.get('web') or d.get('installed') or {};print(w.get('client_id',''))" "$JSON")"
+  GSEC="$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));w=d.get('web') or d.get('installed') or {};print(w.get('client_secret',''))" "$JSON")"
+else
+  read -rs -p "Paste GOOGLE_CLIENT_ID (hidden), then Enter: " GCID; echo
+  read -rs -p "Paste GOOGLE_CLIENT_SECRET (hidden), then Enter: " GSEC; echo
+fi
 GCID="$(printf '%s' "$GCID" | tr -d '[:space:]')"
 GSEC="$(printf '%s' "$GSEC" | tr -d '[:space:]')"
-[ -z "$GCID" ] || [ -z "$GSEC" ] && { echo "✗ Missing a value. Aborting."; exit 1; }
+[ -z "$GCID" ] || [ -z "$GSEC" ] && { echo "✗ Missing a value (couldn't read client_id/client_secret). Aborting."; exit 1; }
+echo "Client ID ends with: …${GCID: -30}"
+echo "Secret starts with:  ${GSEC:0:7}…  (length ${#GSEC})"
 
 # --- format sanity (catches the most common: ID/secret swapped) ---
 case "$GCID" in

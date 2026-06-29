@@ -20,3 +20,8 @@ next-env.d.ts
 
 # Evolution OS server data store
 /.data/
+
+# Google OAuth client secret downloads (never commit)
+client_secret_*.json
+*client_secret*.json
+google-client*.json
