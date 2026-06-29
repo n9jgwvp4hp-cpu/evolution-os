@@ -14,6 +14,8 @@ import type { Mission, MissionStep, MissionApiMsg } from "@/lib/missionTypes";
  */
 
 const MAX_TURNS = 22; // research missions need room to search + read several sources
+const MAX_ATTEMPTS = 3; // bounded auto-retry of a mission that fails (transient errors)
+const RETRY_DELAY_MS = 30_000; // back off before re-running a failed mission
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
 function model() {
@@ -69,6 +71,7 @@ export async function createMission(
     api: [{ role: "user", content: objective }],
     pending: [],
     qcLeft: 2,
+    attempts: 0,
     acknowledged: false,
     scheduledFor: scheduled,
     recurrence: opts.recurrence,
@@ -376,8 +379,23 @@ export async function runMission(id: string) {
     }
     await finalize(id, "Reached the mission step limit; reporting partial progress.");
   } catch (e: any) {
-    await addStep(id, { kind: "error", text: e?.message || "Mission failed." });
-    await patch(id, { status: "failed", result: e?.message || "Failed." });
+    const msg = e?.message || "Mission failed.";
+    const m = await getMission(id);
+    const attempts = (m?.attempts ?? 0) + 1;
+    await addStep(id, { kind: "error", text: msg });
+    if (attempts < MAX_ATTEMPTS) {
+      // Transient failure → re-queue with backoff. Safe to re-run: the
+      // idempotency guard skips any action already completed this mission.
+      await addStep(id, { kind: "progress", text: `Auto-retry ${attempts + 1}/${MAX_ATTEMPTS} after failure` });
+      await patch(id, {
+        status: "queued",
+        attempts,
+        pending: [],
+        scheduledFor: Date.now() + RETRY_DELAY_MS,
+      });
+    } else {
+      await patch(id, { status: "failed", attempts, result: msg });
+    }
   }
 }
 

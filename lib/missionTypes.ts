@@ -45,6 +45,7 @@ export type Mission = {
   pendingDecision?: boolean | null; // user's approve/decline answer, applied by the worker on resume
   result?: string;
   qcLeft: number; // remaining quality-control revision passes
+  attempts?: number; // how many times this mission has been (re)started, for bounded retry
   acknowledged?: boolean; // user has seen the completed result (durable, server-side)
   scheduledFor?: number; // epoch ms; the worker won't start it until due (undefined = now)
   recurrence?: { everyMs: number }; // if set, a fresh run is queued after each completion
