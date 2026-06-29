@@ -17,6 +17,12 @@ export async function GET() {
   const secret = process.env.GOOGLE_CLIENT_SECRET || "";
   const redirect = process.env.GOOGLE_REDIRECT_URI || "";
 
+  // Full credential surface the running process sees (KEY NAMES ONLY, no values)
+  // — proves no alternate/correct secret var is hiding anywhere in the env.
+  const credEnvKeys = Object.keys(process.env)
+    .filter((k) => /GOOGLE|OAUTH|CLIENT|SECRET/i.test(k))
+    .sort();
+
   const diag = {
     client_id: id, // public value — safe to show
     client_id_valid_shape: id.endsWith(".apps.googleusercontent.com"),
@@ -56,5 +62,5 @@ export async function GET() {
     google_error = e?.message || "network error";
   }
 
-  return NextResponse.json({ google_verdict, google_error, diag });
+  return NextResponse.json({ google_verdict, google_error, credEnvKeys, diag });
 }
