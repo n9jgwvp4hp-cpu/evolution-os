@@ -324,11 +324,13 @@ async function finalize(id: string, candidate: string) {
   await addStep(id, { kind: "result", text: report });
   await patch(id, { status: "done", result: report, pending: [] });
 
-  // Recurring missions queue their next run.
-  if (m.recurrence?.everyMs) {
+  // Recurring missions queue their next run — but re-read first, so a mission
+  // canceled mid-run (recurrence cleared) does NOT spawn another occurrence.
+  const fresh = await getMission(id);
+  if (fresh?.recurrence?.everyMs) {
     await createMission(m.objective, {
-      scheduledFor: Date.now() + m.recurrence.everyMs,
-      recurrence: m.recurrence,
+      scheduledFor: Date.now() + fresh.recurrence.everyMs,
+      recurrence: fresh.recurrence,
     });
   }
 }
@@ -381,7 +383,10 @@ export async function runMission(id: string) {
   } catch (e: any) {
     const msg = e?.message || "Mission failed.";
     const m = await getMission(id);
-    const attempts = (m?.attempts ?? 0) + 1;
+    // If the mission was canceled or already finalized while this run was in
+    // flight, do NOT resurrect it via retry.
+    if (!m || m.status === "done") return;
+    const attempts = (m.attempts ?? 0) + 1;
     await addStep(id, { kind: "error", text: msg });
     if (attempts < MAX_ATTEMPTS) {
       // Transient failure → re-queue with backoff. Safe to re-run: the
