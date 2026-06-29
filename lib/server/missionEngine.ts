@@ -404,6 +404,21 @@ export async function runMission(id: string) {
  * Execution never happens here (this may run on the stateless web tier) — the
  * worker picks the re-queued mission up and applies the decision on resume.
  */
+export async function cancelMission(id: string) {
+  await mutate((db) => {
+    const m = db.missions.find((x) => x.id === id);
+    if (!m) return;
+    m.recurrence = undefined;          // stop any future occurrences
+    m.pending = [];
+    if (m.status !== "done") {
+      m.status = "done";
+      m.result = (m.result ? m.result + " " : "") + "(canceled)";
+      m.acknowledged = true;
+    }
+    m.updatedAt = Date.now();
+  });
+}
+
 export async function approveMission(id: string, approved: boolean) {
   const m = await getMission(id);
   if (!m || m.status !== "needs_approval" || !m.pending.length) return;
