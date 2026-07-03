@@ -1,7 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { Pool, type PoolClient } from "pg";
-import type { Mission } from "@/lib/missionTypes";
 import type { Task, Contact, Deal, Note, Memory } from "@/lib/types";
 
 /**
@@ -27,8 +26,11 @@ export type GoogleTokens = {
   email?: string;
 };
 
+// Missions live in their own normalized tables (see migrations/001_missions.sql
+// and lib/server/missionStore.ts). This blob holds only the smaller, read-mostly
+// brain collections; they don't churn per mission step, so a single-row JSONB is
+// still the right fit for them.
 export type Shape = {
-  missions: Mission[];
   memories: Memory[];
   notes: Note[];
   tasks: Task[];
@@ -39,7 +41,6 @@ export type Shape = {
 };
 
 const empty: Shape = {
-  missions: [],
   memories: [],
   notes: [],
   tasks: [],
@@ -51,7 +52,7 @@ const empty: Shape = {
 const merge = (state: any): Shape => ({ ...empty, ...(state || {}) });
 
 const DATABASE_URL = process.env.DATABASE_URL || "";
-const USE_PG = Boolean(DATABASE_URL);
+export const USE_PG = Boolean(DATABASE_URL);
 export const dbBackend = () => (USE_PG ? "postgres" : "file");
 
 /* ===================== Postgres backend ===================== */
@@ -74,7 +75,7 @@ function stripSslmode(url: string): string {
   }
 }
 
-function getPool(): Pool {
+export function getPool(): Pool {
   if (!pool) {
     const local = /@(localhost|127\.0\.0\.1)/.test(DATABASE_URL);
     pool = new Pool({
@@ -88,7 +89,7 @@ function getPool(): Pool {
   return pool;
 }
 
-function ensureSchema(): Promise<void> {
+export function ensureSchema(): Promise<void> {
   if (!schemaReady) {
     schemaReady = (async () => {
       const p = getPool();
@@ -181,14 +182,6 @@ export async function mutate<T>(fn: (db: Shape) => T): Promise<T> {
 
 export function uid(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
-}
-
-/* ---- mission helpers ---- */
-export async function getMission(id: string) {
-  return read((db) => db.missions.find((m) => m.id === id));
-}
-export async function listMissions() {
-  return read((db) => [...db.missions].sort((a, b) => b.createdAt - a.createdAt));
 }
 
 /* ---- worker liveness (observability for the always-on runtime) ---- */

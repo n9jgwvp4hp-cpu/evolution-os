@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { read, getWorkerHeartbeat, dbBackend } from "@/lib/server/db";
+import { missionStats } from "@/lib/server/missionStore";
 import { startWorker } from "@/lib/server/missionEngine";
 
 export const runtime = "nodejs";
@@ -16,15 +17,10 @@ export async function GET() {
   startWorker();
   const beat = await getWorkerHeartbeat();
   const ageMs = beat ? Date.now() - beat : null;
-  const { counts, storeBytes, apiMsgs } = await read((db) => {
-    const c: Record<string, number> = {};
-    for (const m of db.missions) c[m.status] = (c[m.status] || 0) + 1;
-    return {
-      counts: c,
-      storeBytes: JSON.stringify(db).length,
-      apiMsgs: db.missions.reduce((n, m) => n + (m.api?.length || 0), 0),
-    };
-  });
+  const [{ counts, apiMsgs }, storeBytes] = await Promise.all([
+    missionStats(),
+    read((db) => JSON.stringify(db).length), // brain collections blob (missions are now separate tables)
+  ]);
   return NextResponse.json({
     ok: true,
     store: dbBackend(),

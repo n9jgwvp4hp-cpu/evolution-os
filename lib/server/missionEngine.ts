@@ -1,7 +1,21 @@
-import { mutate, getMission, listMissions, uid, dbBackend, setWorkerHeartbeat } from "@/lib/server/db";
+import { uid, dbBackend, setWorkerHeartbeat } from "@/lib/server/db";
+import {
+  createMissionRow,
+  getMission,
+  listRunnable,
+  patchMission,
+  addStep as storeAddStep,
+  pushApi as storePushApi,
+  clearApi,
+  trimTerminalApi,
+  cancelMissionRow,
+  pruneMissions as storePrune,
+} from "@/lib/server/missionStore";
 import { getServerTool, serverToolSchemas } from "@/lib/server/tools";
 import { buildBrainContext } from "@/lib/server/data";
 import type { Mission, MissionStep, MissionApiMsg } from "@/lib/missionTypes";
+
+export { getMission };
 
 /**
  * Server mission engine — persistent, autonomous execution.
@@ -26,31 +40,10 @@ function key() {
   return process.env.OPENAI_API_KEY || "";
 }
 
-/* ---- persistence helpers (all go through the durable store) ---- */
-async function patch(id: string, p: Partial<Mission>) {
-  await mutate((db) => {
-    const m = db.missions.find((x) => x.id === id);
-    if (m) Object.assign(m, p, { updatedAt: Date.now() });
-  });
-}
-async function addStep(id: string, step: Omit<MissionStep, "id" | "ts">) {
-  await mutate((db) => {
-    const m = db.missions.find((x) => x.id === id);
-    if (m) {
-      m.steps.push({ ...step, id: uid(), ts: Date.now() });
-      m.updatedAt = Date.now();
-    }
-  });
-}
-async function pushApi(id: string, msg: MissionApiMsg) {
-  await mutate((db) => {
-    const m = db.missions.find((x) => x.id === id);
-    if (m) {
-      m.api.push(msg);
-      m.updatedAt = Date.now();
-    }
-  });
-}
+/* ---- persistence helpers — thin aliases over the row-scoped mission store ---- */
+const patch = (id: string, p: Partial<Mission>) => patchMission(id, p);
+const addStep = (id: string, step: Omit<MissionStep, "id" | "ts">) => storeAddStep(id, step);
+const pushApi = (id: string, msg: MissionApiMsg) => storePushApi(id, msg);
 
 export async function createMission(
   objective: string,
@@ -79,20 +72,14 @@ export async function createMission(
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
-  await mutate((db) => db.missions.unshift(m));
+  await createMissionRow(m);
   return m;
 }
 
 /** Mark a completed mission as seen — durable, so results are never lost and
  *  "results waiting" is consistent across devices and restarts. */
 export async function setMissionAcknowledged(id: string, acknowledged: boolean) {
-  await mutate((db) => {
-    const m = db.missions.find((x) => x.id === id);
-    if (m) {
-      m.acknowledged = acknowledged;
-      m.updatedAt = Date.now();
-    }
-  });
+  await patch(id, { acknowledged });
 }
 
 /* ---- model calls ---- */
@@ -325,7 +312,8 @@ async function finalize(id: string, candidate: string) {
   await addStep(id, { kind: "result", text: report });
   // Drop the heavy model-conversation history on completion. It's only needed
   // for in-flight resume; keeping it bloats the store as missions accumulate.
-  await patch(id, { status: "done", result: report, pending: [], api: [] });
+  await patch(id, { status: "done", result: report, pending: [] });
+  await clearApi(id);
 
   // Recurring missions queue their next run — but re-read first, so a mission
   // canceled mid-run (recurrence cleared) does NOT spawn another occurrence.
@@ -402,7 +390,8 @@ export async function runMission(id: string) {
         scheduledFor: Date.now() + RETRY_DELAY_MS,
       });
     } else {
-      await patch(id, { status: "failed", attempts, result: msg, api: [] });
+      await patch(id, { status: "failed", attempts, result: msg });
+      await clearApi(id);
     }
   }
 }
@@ -413,18 +402,7 @@ export async function runMission(id: string) {
  * worker picks the re-queued mission up and applies the decision on resume.
  */
 export async function cancelMission(id: string) {
-  await mutate((db) => {
-    const m = db.missions.find((x) => x.id === id);
-    if (!m) return;
-    m.recurrence = undefined;          // stop any future occurrences
-    m.pending = [];
-    if (m.status !== "done") {
-      m.status = "done";
-      m.result = (m.result ? m.result + " " : "") + "(canceled)";
-      m.acknowledged = true;
-    }
-    m.updatedAt = Date.now();
-  });
+  await cancelMissionRow(id);
 }
 
 export async function approveMission(id: string, approved: boolean) {
@@ -433,34 +411,11 @@ export async function approveMission(id: string, approved: boolean) {
   await patch(id, { status: "queued", scheduledFor: undefined, pendingDecision: approved });
 }
 
-/** One-time maintenance: drop conversation history from already-terminal
- *  missions so the store doesn't carry historical bloat. Runs at worker boot. */
-async function trimTerminalApi() {
-  await mutate((db) => {
-    for (const m of db.missions) {
-      if ((m.status === "done" || m.status === "failed") && m.api.length) m.api = [];
-    }
-  });
-}
-
-const MISSION_CAP = 1000; // keep the store bounded on a long-running persistent OS
-
-/**
- * Bounded-growth guardrail: keep every active mission plus the most recent
- * terminal ones, up to MISSION_CAP total; drop the oldest terminal records.
- * The work products (notes/tasks/contacts/deals/memories) live in their own
- * brain collections, so pruning a completed mission's LOG loses nothing real.
- */
-async function pruneMissions() {
-  await mutate((db) => {
-    if (db.missions.length <= MISSION_CAP) return;
-    const isTerminal = (m: Mission) => m.status === "done" || m.status === "failed";
-    const active = db.missions.filter((m) => !isTerminal(m));
-    const terminal = db.missions.filter(isTerminal).sort((a, b) => b.createdAt - a.createdAt);
-    const keepTerminal = terminal.slice(0, Math.max(0, MISSION_CAP - active.length));
-    db.missions = [...active, ...keepTerminal].sort((a, b) => b.createdAt - a.createdAt);
-  });
-}
+// Keep the store bounded on a long-running persistent OS. Pruning drops only the
+// oldest TERMINAL missions beyond the cap; work products live in their own brain
+// collections, so a pruned mission log loses nothing real. (Implemented in the
+// mission store so it's a single indexed DELETE, not a whole-store rewrite.)
+const MISSION_CAP = 1000;
 
 /* ---- background worker ---- */
 let workerStarted = false;
@@ -476,7 +431,7 @@ export function startWorker() {
 
   // Shrink any historical bloat once on boot (non-blocking).
   trimTerminalApi().catch(() => {});
-  pruneMissions().catch(() => {});
+  storePrune(MISSION_CAP).catch(() => {});
 
   const claim = (id: string) => {
     inflight.add(id);
@@ -498,19 +453,14 @@ export function startWorker() {
       // every tick (pruning is a no-op until MISSION_CAP is exceeded).
       if (Date.now() - lastPrune > 5 * 60_000) {
         lastPrune = Date.now();
-        await pruneMissions().catch(() => {});
+        await storePrune(MISSION_CAP).catch(() => {});
       }
-      const missions = await listMissions();
-      // Newly queued work, plus any mission left "running" that isn't currently
-      // being worked in this process — i.e. resume immediately after a restart.
-      // The inflight set prevents double-running; the idempotency guard makes
+      // Newly queued work that's due, plus any mission left "running" that isn't
+      // currently being worked in this process — i.e. resume immediately after a
+      // restart. This is now an indexed query, not a full-store read. The
+      // inflight set prevents double-running; the idempotency guard makes
       // resuming a half-done turn safe.
-      const now = Date.now();
-      const candidates = missions.filter(
-        (m) =>
-          (m.status === "queued" && (!m.scheduledFor || m.scheduledFor <= now)) ||
-          m.status === "running"
-      );
+      const candidates = await listRunnable(Date.now());
       for (const m of candidates) {
         if (inflight.size >= MAX_CONCURRENT) break;
         if (inflight.has(m.id)) continue;

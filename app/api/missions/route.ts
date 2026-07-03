@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listMissions } from "@/lib/server/db";
+import { listMissionViews } from "@/lib/server/missionStore";
 import { createMission, startWorker } from "@/lib/server/missionEngine";
-import type { MissionView } from "@/lib/missionTypes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,9 +8,8 @@ export const dynamic = "force-dynamic";
 /** GET — all missions with progress + results (the heavy api history is omitted). */
 export async function GET() {
   startWorker(); // idempotent — boots the background worker on first request after a (re)start
-  const missions = await listMissions();
-  const views: MissionView[] = missions.map(({ api, ...rest }) => rest);
-  return NextResponse.json({ missions: views });
+  const missions = await listMissionViews();
+  return NextResponse.json({ missions });
 }
 
 /** POST — accept an objective and enqueue it; the worker executes it server-side. */
