@@ -8,9 +8,10 @@ import type { Mission, MissionStep, MissionApiMsg } from "@/lib/missionTypes";
  *
  * The user states an objective; this plans, executes capabilities step by
  * step, monitors its own work with a quality-control pass, and reports back.
- * It runs in the server process (started by instrumentation.ts) so missions
- * continue regardless of whether the app is open. All state is persisted, so
- * a restart resumes missions exactly where they left off.
+ * It runs in a dedicated worker process (worker.ts) — and, as a fallback, in
+ * the web server itself unless DISABLE_WORKER is set — so missions continue
+ * regardless of whether the app is open. All state is persisted, so a restart
+ * resumes missions exactly where they left off.
  */
 
 const MAX_TURNS = 22; // research missions need room to search + read several sources
@@ -442,6 +443,25 @@ async function trimTerminalApi() {
   });
 }
 
+const MISSION_CAP = 1000; // keep the store bounded on a long-running persistent OS
+
+/**
+ * Bounded-growth guardrail: keep every active mission plus the most recent
+ * terminal ones, up to MISSION_CAP total; drop the oldest terminal records.
+ * The work products (notes/tasks/contacts/deals/memories) live in their own
+ * brain collections, so pruning a completed mission's LOG loses nothing real.
+ */
+async function pruneMissions() {
+  await mutate((db) => {
+    if (db.missions.length <= MISSION_CAP) return;
+    const isTerminal = (m: Mission) => m.status === "done" || m.status === "failed";
+    const active = db.missions.filter((m) => !isTerminal(m));
+    const terminal = db.missions.filter(isTerminal).sort((a, b) => b.createdAt - a.createdAt);
+    const keepTerminal = terminal.slice(0, Math.max(0, MISSION_CAP - active.length));
+    db.missions = [...active, ...keepTerminal].sort((a, b) => b.createdAt - a.createdAt);
+  });
+}
+
 /* ---- background worker ---- */
 let workerStarted = false;
 const inflight = new Set<string>();
@@ -456,6 +476,7 @@ export function startWorker() {
 
   // Shrink any historical bloat once on boot (non-blocking).
   trimTerminalApi().catch(() => {});
+  pruneMissions().catch(() => {});
 
   const claim = (id: string) => {
     inflight.add(id);
@@ -465,12 +486,19 @@ export function startWorker() {
   };
 
   let lastBeat = 0;
+  let lastPrune = 0;
   const tick = async () => {
     try {
       // Throttled liveness beat so /api/health can confirm the runtime is alive.
       if (Date.now() - lastBeat > 15_000) {
         lastBeat = Date.now();
         await setWorkerHeartbeat().catch(() => {});
+      }
+      // Keep the store bounded on a long-running OS — check occasionally, not
+      // every tick (pruning is a no-op until MISSION_CAP is exceeded).
+      if (Date.now() - lastPrune > 5 * 60_000) {
+        lastPrune = Date.now();
+        await pruneMissions().catch(() => {});
       }
       const missions = await listMissions();
       // Newly queued work, plus any mission left "running" that isn't currently

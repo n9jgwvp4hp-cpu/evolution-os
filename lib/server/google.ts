@@ -1,4 +1,5 @@
 import { mutate, read, type GoogleTokens } from "@/lib/server/db";
+import { fetchWithTimeout } from "@/lib/server/http";
 
 /**
  * Server-side Google access for the mission worker.
@@ -31,7 +32,7 @@ export async function isGoogleConnectedServer(): Promise<boolean> {
 async function refresh(tokens: GoogleTokens): Promise<GoogleTokens> {
   const { clientId, clientSecret } = cfg();
   if (!tokens.refresh_token) throw new Error("No refresh token; reconnect Google.");
-  const res = await fetch("https://oauth2.googleapis.com/token", {
+  const res = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -50,13 +51,22 @@ async function refresh(tokens: GoogleTokens): Promise<GoogleTokens> {
   };
 }
 
+// Single-flight: concurrent missions hitting an expired token share ONE refresh
+// instead of each POSTing to Google (redundant, and racy on the token write).
+let refreshInFlight: Promise<GoogleTokens> | null = null;
+
 /** Valid access token for headless use, refreshing + persisting as needed. */
 export async function getServerAccessToken(): Promise<string> {
-  let tokens = await readGoogleTokens();
+  const tokens = await readGoogleTokens();
   if (!tokens) throw new Error("Google is not connected.");
-  if (Date.now() > tokens.expiry - 60_000) {
-    tokens = await refresh(tokens);
-    await saveGoogleTokens(tokens);
+  if (Date.now() <= tokens.expiry - 60_000) return tokens.access_token;
+
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const next = await refresh(tokens);
+      await saveGoogleTokens(next);
+      return next;
+    })().finally(() => { refreshInFlight = null; });
   }
-  return tokens.access_token;
+  return (await refreshInFlight).access_token;
 }

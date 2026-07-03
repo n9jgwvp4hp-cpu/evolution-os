@@ -95,11 +95,25 @@ export default function EvolutionOS() {
     setLoaded(true);
   }, []);
 
-  // persist only when idle (guarantees a consistent tool/assistant history)
+  // persist only when idle (guarantees a consistent tool/assistant history).
+  // Cap what we store: the transcript grows without bound over a long-lived OS,
+  // and an oversized blob would blow the localStorage quota and silently stop
+  // all persistence. Keep the most recent slice — plenty for continuity.
   useEffect(() => {
     if (!loaded || busy) return;
     try {
-      localStorage.setItem(STORAGE, JSON.stringify({ items, api: apiRef.current }));
+      const KEEP = 400;
+      const trimmedItems = items.length > KEEP ? items.slice(-KEEP) : items;
+      let trimmedApi = apiRef.current;
+      if (trimmedApi.length > KEEP) {
+        trimmedApi = trimmedApi.slice(-KEEP);
+        // Resume at a clean user turn so we never persist an orphaned tool
+        // message (a tool reply whose assistant tool_calls got trimmed away),
+        // which the model API would reject on the next call.
+        const firstUser = trimmedApi.findIndex((m) => m.role === "user");
+        trimmedApi = firstUser > 0 ? trimmedApi.slice(firstUser) : trimmedApi;
+      }
+      localStorage.setItem(STORAGE, JSON.stringify({ items: trimmedItems, api: trimmedApi }));
     } catch { /* ignore */ }
   }, [items, busy, loaded]);
 

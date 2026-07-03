@@ -75,7 +75,12 @@ export async function exchangeCode(code: string): Promise<GoogleTokens> {
       grant_type: "authorization_code",
     }),
   });
-  if (!res.ok) throw new Error("Token exchange failed: " + (await res.text()));
+  if (!res.ok) {
+    // Log the provider's detail server-side only; never surface it to the client
+    // (the callback route redirects the message into a user-visible URL param).
+    console.error("[google] token exchange failed:", (await res.text().catch(() => "")).slice(0, 300));
+    throw new Error("Token exchange failed.");
+  }
   const data = await res.json();
 
   let email: string | undefined;
@@ -111,7 +116,10 @@ async function refresh(tokens: GoogleTokens): Promise<GoogleTokens> {
       grant_type: "refresh_token",
     }),
   });
-  if (!res.ok) throw new Error("Token refresh failed: " + (await res.text()));
+  if (!res.ok) {
+    console.error("[google] token refresh failed:", (await res.text().catch(() => "")).slice(0, 300));
+    throw new Error("Token refresh failed.");
+  }
   const data = await res.json();
   return {
     ...tokens,

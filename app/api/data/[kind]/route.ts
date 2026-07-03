@@ -17,7 +17,12 @@ export async function PUT(req: NextRequest, { params }: { params: { kind: string
   if (!isBrainKind(params.kind)) {
     return NextResponse.json({ error: "Unknown collection." }, { status: 404 });
   }
-  const body = await req.json().catch(() => ({}));
-  const items = Array.isArray(body.items) ? body.items : [];
-  return NextResponse.json(await replaceKind(params.kind, items));
+  // A malformed body must NOT be treated as an empty collection — that would
+  // silently wipe stored data. Require an explicit array (an empty array is a
+  // legitimate "delete everything" the user performed in the module view).
+  const body = await req.json().catch(() => null);
+  if (!body || !Array.isArray(body.items)) {
+    return NextResponse.json({ error: "Body must be { items: [...] }." }, { status: 400 });
+  }
+  return NextResponse.json(await replaceKind(params.kind, body.items));
 }

@@ -10,21 +10,12 @@
  * Returns normalized results: { title, url, snippet }.
  */
 
+import { fetchWithTimeout as fetchT } from "@/lib/server/http";
+
 export type SearchResult = { title: string; url: string; snippet: string };
 
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
-
-/** fetch with a hard timeout so a slow provider can never hang a mission. */
-async function fetchT(url: string | URL, init: RequestInit = {}, ms = 15_000): Promise<Response> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), ms);
-  try {
-    return await fetch(url, { ...init, signal: ctrl.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 function strip(html: string): string {
   return html

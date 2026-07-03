@@ -1,4 +1,5 @@
 import * as data from "@/lib/server/data";
+import { fetchWithTimeout } from "@/lib/server/http";
 
 /**
  * Server-side capabilities — the single capability surface for the whole OS.
@@ -189,7 +190,7 @@ export const SERVER_TOOLS: ServerTool[] = [
         `Content-Type: text/plain; charset=utf-8\r\n\r\n${a.body || ""}`;
       const encoded = Buffer.from(raw).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
       try {
-        const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+        const res = await fetchWithTimeout("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({ raw: encoded }),
@@ -197,7 +198,7 @@ export const SERVER_TOOLS: ServerTool[] = [
         if (!res.ok) return { ok: false, error: "Gmail send failed: " + (await res.text()).slice(0, 200) };
         return { ok: true, emailedTo: a.to };
       } catch (e: any) {
-        return { ok: false, error: e?.message || "Send failed." };
+        return { ok: false, error: e?.name === "AbortError" ? "Gmail send timed out." : e?.message || "Send failed." };
       }
     },
   },
@@ -227,7 +228,7 @@ export const SERVER_TOOLS: ServerTool[] = [
       const startDate = new Date(a.start);
       const endDate = a.end ? new Date(a.end) : new Date(startDate.getTime() + 60 * 60 * 1000);
       try {
-        const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+        const res = await fetchWithTimeout("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -242,7 +243,7 @@ export const SERVER_TOOLS: ServerTool[] = [
         const ev = await res.json();
         return { ok: true, eventCreated: a.summary, link: ev.htmlLink };
       } catch (e: any) {
-        return { ok: false, error: e?.message || "Create failed." };
+        return { ok: false, error: e?.name === "AbortError" ? "Calendar create timed out." : e?.message || "Create failed." };
       }
     },
   },
