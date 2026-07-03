@@ -49,9 +49,15 @@ export type Mission = {
   acknowledged?: boolean; // user has seen the completed result (durable, server-side)
   scheduledFor?: number; // epoch ms; the worker won't start it until due (undefined = now)
   recurrence?: { everyMs: number }; // if set, a fresh run is queued after each completion
+  // Concurrency lease: which worker process is executing this mission and until
+  // when (epoch ms). Set by an atomic DB claim; refreshed each turn; cleared on
+  // completion. Lets multiple worker instances run safely and lets a dead
+  // worker's mission be reclaimed once its lease expires.
+  workerId?: string;
+  leaseExpires?: number;
   createdAt: number;
   updatedAt: number;
 };
 
 /** The client never needs the heavy internals — this is what the UI renders. */
-export type MissionView = Omit<Mission, "api">;
+export type MissionView = Omit<Mission, "api" | "workerId" | "leaseExpires">;

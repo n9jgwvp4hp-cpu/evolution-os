@@ -9,11 +9,18 @@ import {
   createMissionRow, getMission, listMissionViews, listRunnable,
   patchMission, addStep, pushApi, clearApi, trimTerminalApi,
   cancelMissionRow, pruneMissions, missionStats,
+  claimMission, extendLease, releaseLease,
 } from "@/lib/server/missionStore";
 import type { Mission } from "@/lib/missionTypes";
 
 let pass = 0, fail = 0;
 const ok = (c: boolean, m: string) => { c ? pass++ : fail++; console.log(`  ${c ? "✓" : "✗ FAIL"} ${m}`); };
+
+// Simulate a dead worker: push this mission's lease into the past. (File backend
+// only — patch persists any field; the Postgres path is exercised in prod.)
+async function forceLeaseExpired(id: string) {
+  await patchMission(id, { leaseExpires: Date.now() - 1000 });
+}
 
 function mk(id: string, over: Partial<Mission> = {}): Mission {
   const now = Date.now();
@@ -91,6 +98,42 @@ function mk(id: string, over: Partial<Mission> = {}): Mission {
   ok(after.some((v) => v.id === "act"), "prune never drops active missions");
   ok(after.length <= 3 + 2, "prune bounds terminal count near cap"); // active(b queued, a done->terminal counts) tolerance
   ok(after.some((v) => v.id === "t4") && !after.some((v) => v.id === "t0"), "prune keeps newest terminal, drops oldest");
+
+  /* ---------- lease / cross-process atomic claim ---------- */
+  await fs.rm(path.join(process.cwd(), ".data", "missions.json"), { force: true });
+
+  // concurrent claim of ONE queued mission → exactly one winner
+  await createMissionRow(mk("c1", { status: "queued" }));
+  const results = await Promise.all(
+    ["wA", "wB", "wC", "wD", "wE"].map((w) => claimMission("c1", w, 60_000))
+  );
+  ok(results.filter(Boolean).length === 1, `concurrent claim: exactly one worker wins (won=${results.filter(Boolean).length})`);
+  const claimed = await getMission("c1");
+  ok(claimed?.status === "running" && !!claimed?.workerId, "claimed mission is running + has an owner");
+
+  // a second claim while the lease is valid → denied
+  ok((await claimMission("c1", "wZ", 60_000)) === false, "valid lease blocks re-claim");
+
+  // owner can extend; a non-owner cannot
+  const owner = claimed!.workerId!;
+  ok((await extendLease("c1", owner, 60_000)) === true, "owner extends its lease");
+  ok((await extendLease("c1", "someoneElse", 60_000)) === false, "non-owner cannot extend");
+
+  // stale lease → another worker reclaims (dead-worker recovery)
+  await forceLeaseExpired("c1");
+  ok((await claimMission("c1", "wNew", 60_000)) === true, "lapsed lease → reclaimed by another worker");
+  ok((await getMission("c1"))?.workerId === "wNew", "reclaim transfers ownership");
+  ok((await extendLease("c1", owner, 60_000)) === false, "old owner loses the lease after reclaim");
+
+  // release clears ownership; queued mission is claimable again
+  await patchMission("c1", { status: "queued" });
+  await releaseLease("c1");
+  const rel = await getMission("c1");
+  ok(!rel?.workerId && !rel?.leaseExpires, "release clears owner + lease");
+
+  // lease fields never leak into the UI view
+  const views2 = await listMissionViews();
+  ok(views2.every((v) => !("workerId" in (v as any)) && !("leaseExpires" in (v as any))), "views omit lease fields");
 
   // cleanup
   await fs.rm(path.join(process.cwd(), ".data", "missions.json"), { force: true });

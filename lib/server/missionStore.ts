@@ -47,11 +47,17 @@ function initPg(): Promise<void> {
           pending_decision BOOLEAN,
           scheduled_for BIGINT,
           recurrence_every_ms BIGINT,
+          worker_id TEXT,
+          lease_expires BIGINT,
           created_at BIGINT NOT NULL,
           updated_at BIGINT NOT NULL
         )`);
+      // Lease columns for pre-existing deployments (missions table already created).
+      await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS worker_id TEXT`);
+      await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS lease_expires BIGINT`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_status_sched ON missions (status, scheduled_for)`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_created ON missions (created_at DESC)`);
+      await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_lease ON missions (status, lease_expires)`);
       await p.query(`
         CREATE TABLE IF NOT EXISTS mission_steps (
           seq BIGSERIAL PRIMARY KEY,
@@ -151,6 +157,8 @@ function rowToMission(r: any, steps: MissionStep[], api: MissionApiMsg[]): Missi
     pendingDecision: r.pending_decision, // null | true | false
     scheduledFor: r.scheduled_for != null ? Number(r.scheduled_for) : undefined,
     recurrence: r.recurrence_every_ms != null ? { everyMs: Number(r.recurrence_every_ms) } : undefined,
+    workerId: r.worker_id ?? undefined,
+    leaseExpires: r.lease_expires != null ? Number(r.lease_expires) : undefined,
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
     steps,
@@ -288,32 +296,119 @@ export async function listMissionViews(): Promise<MissionView[]> {
       byMission.set(s.mission_id, arr);
     }
     return rows.map((r) => {
-      const { api, ...view } = rowToMission(r, byMission.get(r.id) || [], []);
+      const { api, workerId, leaseExpires, ...view } = rowToMission(r, byMission.get(r.id) || [], []);
       return view;
     });
   }
   return fileRead((list) =>
-    [...list].sort((a, b) => b.createdAt - a.createdAt).map(({ api, ...view }) => view)
+    [...list]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map(({ api, workerId, leaseExpires, ...view }) => view)
   );
 }
 
-/** Lightweight rows the worker needs to decide what to run — no steps/api. */
+/**
+ * Claimable candidates for the worker — the lightweight rows it may try to run:
+ * queued-and-due missions, plus running missions whose lease has lapsed (their
+ * worker died). Missions actively held by a live worker (valid lease) are
+ * excluded, so workers don't fight over them. No steps/api loaded.
+ */
 export async function listRunnable(now: number): Promise<Array<{ id: string; status: string }>> {
   if (USE_PG) {
     await initPg();
     const { rows } = await getPool().query(
       `SELECT id, status FROM missions
-        WHERE status = 'running'
-           OR (status = 'queued' AND (scheduled_for IS NULL OR scheduled_for <= $1))`,
+        WHERE (status = 'queued'  AND (scheduled_for IS NULL OR scheduled_for <= $1))
+           OR (status = 'running' AND (lease_expires IS NULL OR lease_expires <= $1))`,
       [now]
     );
     return rows;
   }
   return fileRead((list) =>
     list
-      .filter((m) => m.status === "running" || (m.status === "queued" && (!m.scheduledFor || m.scheduledFor <= now)))
+      .filter(
+        (m) =>
+          (m.status === "queued" && (!m.scheduledFor || m.scheduledFor <= now)) ||
+          (m.status === "running" && (!m.leaseExpires || m.leaseExpires <= now))
+      )
       .map((m) => ({ id: m.id, status: m.status }))
   );
+}
+
+/**
+ * Atomically claim a mission for `workerId`. Succeeds (returns true) only if the
+ * mission is queued-and-due OR running with a lapsed lease — the SAME predicate
+ * across processes, resolved by a single `UPDATE ... WHERE ... RETURNING`, so
+ * Postgres row-locking guarantees exactly one worker wins. Sets the lease.
+ */
+export async function claimMission(id: string, workerId: string, leaseMs: number): Promise<boolean> {
+  const now = Date.now();
+  const expires = now + leaseMs;
+  if (USE_PG) {
+    await initPg();
+    const { rows } = await getPool().query(
+      `UPDATE missions
+          SET status = 'running', worker_id = $2, lease_expires = $3, updated_at = $4
+        WHERE id = $1
+          AND ( (status = 'queued'  AND (scheduled_for IS NULL OR scheduled_for <= $4))
+             OR (status = 'running' AND (lease_expires IS NULL OR lease_expires <= $4)) )
+        RETURNING id`,
+      [id, workerId, expires, now]
+    );
+    return rows.length > 0;
+  }
+  return fileMutate((list) => {
+    const m = list.find((x) => x.id === id);
+    if (!m) return false;
+    const dueQueued = m.status === "queued" && (!m.scheduledFor || m.scheduledFor <= now);
+    const staleRunning = m.status === "running" && (!m.leaseExpires || m.leaseExpires <= now);
+    if (!dueQueued && !staleRunning) return false;
+    m.status = "running";
+    m.workerId = workerId;
+    m.leaseExpires = expires;
+    m.updatedAt = now;
+    return true;
+  });
+}
+
+/**
+ * Refresh the lease while a mission runs. Returns false if this worker no longer
+ * owns it (another worker reclaimed a lapsed lease) — the caller must then STOP
+ * to avoid two workers finishing the same mission.
+ */
+export async function extendLease(id: string, workerId: string, leaseMs: number): Promise<boolean> {
+  const now = Date.now();
+  const expires = now + leaseMs;
+  if (USE_PG) {
+    await initPg();
+    const { rows } = await getPool().query(
+      `UPDATE missions SET lease_expires = $3, updated_at = $4
+        WHERE id = $1 AND worker_id = $2 AND status = 'running'
+        RETURNING id`,
+      [id, workerId, expires, now]
+    );
+    return rows.length > 0;
+  }
+  return fileMutate((list) => {
+    const m = list.find((x) => x.id === id);
+    if (!m || m.workerId !== workerId || m.status !== "running") return false;
+    m.leaseExpires = expires;
+    m.updatedAt = now;
+    return true;
+  });
+}
+
+/** Drop the lease once a mission leaves the running state (terminal or re-queued). */
+export async function releaseLease(id: string): Promise<void> {
+  if (USE_PG) {
+    await initPg();
+    await getPool().query("UPDATE missions SET worker_id = NULL, lease_expires = NULL WHERE id = $1", [id]);
+    return;
+  }
+  await fileMutate((list) => {
+    const m = list.find((x) => x.id === id);
+    if (m) { m.workerId = undefined; m.leaseExpires = undefined; }
+  });
 }
 
 /** Row-scoped patch — updates only the given fields (+ updated_at). */
@@ -413,6 +508,8 @@ export async function cancelMissionRow(id: string): Promise<void> {
       `UPDATE missions
           SET recurrence_every_ms = NULL,
               pending = '[]'::jsonb,
+              worker_id = NULL,
+              lease_expires = NULL,
               status = CASE WHEN status = 'done' THEN status ELSE 'done' END,
               result = CASE WHEN status = 'done' THEN result
                             ELSE COALESCE(result || ' ', '') || '(canceled)' END,
@@ -428,6 +525,8 @@ export async function cancelMissionRow(id: string): Promise<void> {
     if (!m) return;
     m.recurrence = undefined;
     m.pending = [];
+    m.workerId = undefined;
+    m.leaseExpires = undefined;
     if (m.status !== "done") {
       m.status = "done";
       m.result = (m.result ? m.result + " " : "") + "(canceled)";

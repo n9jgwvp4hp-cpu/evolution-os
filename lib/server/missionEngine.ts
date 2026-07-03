@@ -3,6 +3,9 @@ import {
   createMissionRow,
   getMission,
   listRunnable,
+  claimMission,
+  extendLease,
+  releaseLease,
   patchMission,
   addStep as storeAddStep,
   pushApi as storePushApi,
@@ -32,6 +35,14 @@ const MAX_TURNS = 22; // research missions need room to search + read several so
 const MAX_ATTEMPTS = 3; // bounded auto-retry of a mission that fails (transient errors)
 const RETRY_DELAY_MS = 30_000; // back off before re-running a failed mission
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+
+// Cross-process execution lease. A worker holds a mission for LEASE_MS and
+// refreshes it around every blocking step; if it dies, the lease lapses and
+// another worker reclaims the mission. Kept comfortably above the longest single
+// blocking step (the 90s model-call timeout) so a live worker never loses its
+// own lease mid-turn.
+const WORKER_ID = uid(); // unique per worker process
+const LEASE_MS = 120_000;
 
 function model() {
   return process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -314,6 +325,7 @@ async function finalize(id: string, candidate: string) {
   // for in-flight resume; keeping it bloats the store as missions accumulate.
   await patch(id, { status: "done", result: report, pending: [] });
   await clearApi(id);
+  await releaseLease(id);
 
   // Recurring missions queue their next run — but re-read first, so a mission
   // canceled mid-run (recurrence cleared) does NOT spawn another occurrence.
@@ -343,15 +355,24 @@ export async function runMission(id: string) {
       await patch(id, { pending: [], pendingDecision: null });
       await executeCall(id, head.call, decision);
       const paused = await processCalls(id, rest.map((p) => p.call));
-      if (paused) return; // another approval needed
+      if (paused) { await releaseLease(id); return; } // another approval needed
     }
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
+      // Refresh the execution lease each turn. If we no longer own it, another
+      // worker reclaimed this mission (we were presumed dead) — stop immediately
+      // so two workers never finish the same mission.
+      if (!(await extendLease(id, WORKER_ID, LEASE_MS))) return;
+
       const m = await getMission(id);
       if (!m) return;
 
       const system: MissionApiMsg = { role: "system", content: MISSION_SYSTEM(context) };
       const message = await callModel([system, ...m.api], { tools: true });
+      // The model call is the longest blocking step. Re-check ownership BEFORE
+      // writing anything back: if the lease lapsed during the call and another
+      // worker reclaimed the mission, bail without touching its api history.
+      if (!(await extendLease(id, WORKER_ID, LEASE_MS))) return;
       const calls: any[] = message.tool_calls || [];
       await pushApi(id, {
         role: "assistant",
@@ -368,7 +389,7 @@ export async function runMission(id: string) {
       }
 
       const paused = await processCalls(id, calls);
-      if (paused) return; // resumes via approveMission
+      if (paused) { await releaseLease(id); return; } // resumes via approveMission
     }
     await finalize(id, "Reached the mission step limit; reporting partial progress.");
   } catch (e: any) {
@@ -389,9 +410,11 @@ export async function runMission(id: string) {
         pending: [],
         scheduledFor: Date.now() + RETRY_DELAY_MS,
       });
+      await releaseLease(id); // free it for re-claim (possibly by another worker)
     } else {
       await patch(id, { status: "failed", attempts, result: msg });
       await clearApi(id);
+      await releaseLease(id);
     }
   }
 }
@@ -455,16 +478,17 @@ export function startWorker() {
         lastPrune = Date.now();
         await storePrune(MISSION_CAP).catch(() => {});
       }
-      // Newly queued work that's due, plus any mission left "running" that isn't
-      // currently being worked in this process — i.e. resume immediately after a
-      // restart. This is now an indexed query, not a full-store read. The
-      // inflight set prevents double-running; the idempotency guard makes
-      // resuming a half-done turn safe.
+      // Candidates: queued-and-due work, plus missions whose worker died (lapsed
+      // lease). We ATOMICALLY claim each before running it, so across any number
+      // of worker processes exactly one wins the row — the DB, not this in-memory
+      // set, is the source of truth. The inflight set is just a local fast-path
+      // so we don't issue a claim for something we're already running.
       const candidates = await listRunnable(Date.now());
       for (const m of candidates) {
         if (inflight.size >= MAX_CONCURRENT) break;
         if (inflight.has(m.id)) continue;
-        claim(m.id);
+        const won = await claimMission(m.id, WORKER_ID, LEASE_MS);
+        if (won) claim(m.id);
       }
     } catch {
       /* keep the worker alive no matter what */
