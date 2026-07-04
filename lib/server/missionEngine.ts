@@ -265,6 +265,12 @@ async function verify(objective: string, actions: string[], report: string) {
       "actions. Be skeptical.\n" +
       "Rules:\n" +
       "- If the report claims an action that was not actually executed, it FAILS.\n" +
+      "- The ACTIONS list is a TERSE log — it names each executed action but may omit the parameters " +
+      "(a task's priority, a note's body, an event's time). An action shown here executed SUCCESSFULLY " +
+      "and applied the parameters the OBJECTIVE specified. Do NOT mark a report as unsupported merely " +
+      "because a terse action line doesn't restate an argument; only FAIL claims that CONTRADICT the " +
+      "actions or describe something never attempted. (E.g. objective says priority high + a create-task " +
+      "action ran ⇒ 'created with high priority' is SUPPORTED and should PASS.)\n" +
       "- For RESEARCH reports: specific facts (prices, addresses, names, listings, figures) must be " +
       "grounded in sources actually read via fetch_url. Fabricated or uncited specifics FAIL. " +
       "Inventing items to hit a requested count (e.g. padding to 20) FAILS — an honest report of fewer, " +
