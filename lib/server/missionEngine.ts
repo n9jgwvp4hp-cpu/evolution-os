@@ -51,6 +51,14 @@ function key() {
   return process.env.OPENAI_API_KEY || "";
 }
 
+/** Structured, greppable status-transition log (worker stdout → platform logs).
+ *  Every mission state change flows through here so interruption + recovery is
+ *  observable end to end. */
+function logT(id: string, transition: string, note = "") {
+  // eslint-disable-next-line no-console
+  console.log(`[Evolution OS][transition] mission=${id} ${transition}${note ? ` (${note})` : ""}`);
+}
+
 /* ---- persistence helpers — thin aliases over the row-scoped mission store ---- */
 const patch = (id: string, p: Partial<Mission>) => patchMission(id, p);
 const addStep = (id: string, step: Omit<MissionStep, "id" | "ts">) => storeAddStep(id, step);
@@ -84,6 +92,7 @@ export async function createMission(
     updatedAt: Date.now(),
   };
   await createMissionRow(m);
+  logT(m.id, "created → queued", scheduled ? `scheduled ${new Date(scheduled).toISOString()}` : "");
   return m;
 }
 
@@ -247,6 +256,7 @@ async function processCalls(id: string, calls: any[]): Promise<boolean> {
       }));
       await patch(id, { status: "needs_approval", pending });
       await addStep(id, { kind: "progress", text: "Waiting for your approval", detail: tool.summarize(parseArgs(call)) });
+      logT(id, "running → needs_approval");
       return true;
     }
     await executeCall(id, call, true);
@@ -332,6 +342,7 @@ async function finalize(id: string, candidate: string) {
   await patch(id, { status: "done", result: report, pending: [] });
   await clearApi(id);
   await releaseLease(id);
+  logT(id, "running → done");
 
   // Recurring missions queue their next run — but re-read first, so a mission
   // canceled mid-run (recurrence cleared) does NOT spawn another occurrence.
@@ -417,10 +428,12 @@ export async function runMission(id: string) {
         scheduledFor: Date.now() + RETRY_DELAY_MS,
       });
       await releaseLease(id); // free it for re-claim (possibly by another worker)
+      logT(id, "running → queued", `auto-retry ${attempts + 1}/${MAX_ATTEMPTS} after: ${msg.slice(0, 80)}`);
     } else {
       await patch(id, { status: "failed", attempts, result: msg });
       await clearApi(id);
       await releaseLease(id);
+      logT(id, "running → failed", `${attempts} attempts exhausted`);
     }
   }
 }
@@ -494,7 +507,13 @@ export function startWorker() {
         if (inflight.size >= MAX_CONCURRENT) break;
         if (inflight.has(m.id)) continue;
         const won = await claimMission(m.id, WORKER_ID, LEASE_MS);
-        if (won) claim(m.id);
+        if (won) {
+          // status 'running' here means the previous worker died mid-execution
+          // and we're reclaiming its lapsed lease — i.e. recovery after interrupt.
+          if (m.status === "running") logT(m.id, "running → running", `RECOVERED after interruption; resuming on worker ${WORKER_ID}`);
+          else logT(m.id, "queued → running", `worker ${WORKER_ID}`);
+          claim(m.id);
+        }
       }
     } catch {
       /* keep the worker alive no matter what */
