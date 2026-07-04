@@ -32,8 +32,17 @@ export { getMission };
  */
 
 const MAX_TURNS = 22; // research missions need room to search + read several sources
-const MAX_ATTEMPTS = 3; // bounded auto-retry of a mission that fails (transient errors)
-const RETRY_DELAY_MS = 30_000; // back off before re-running a failed mission
+const MAX_ATTEMPTS = 5; // bounded auto-retry of a mission that fails (transient errors)
+const RETRY_BASE_MS = 30_000; // first backoff delay
+const RETRY_MAX_MS = 5 * 60_000; // cap so backoff can't grow unbounded
+
+/** Exponential backoff with light jitter: ~30s, 60s, 120s, 240s … capped at 5m.
+ *  The jitter avoids a thundering herd of retries lining up on the same tick. */
+function backoffMs(attempts: number): number {
+  const exp = Math.min(RETRY_BASE_MS * 2 ** (attempts - 1), RETRY_MAX_MS);
+  const jitter = 0.85 + Math.random() * 0.3; // ±15%
+  return Math.round(exp * jitter);
+}
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
 // Cross-process execution lease. A worker holds a mission for LEASE_MS and
@@ -418,17 +427,18 @@ export async function runMission(id: string) {
     const attempts = (m.attempts ?? 0) + 1;
     await addStep(id, { kind: "error", text: msg });
     if (attempts < MAX_ATTEMPTS) {
-      // Transient failure → re-queue with backoff. Safe to re-run: the
-      // idempotency guard skips any action already completed this mission.
-      await addStep(id, { kind: "progress", text: `Auto-retry ${attempts + 1}/${MAX_ATTEMPTS} after failure` });
+      // Transient failure → re-queue with EXPONENTIAL backoff. Safe to re-run:
+      // the idempotency guard skips any action already completed this mission.
+      const delay = backoffMs(attempts);
+      await addStep(id, { kind: "progress", text: `Auto-retry ${attempts + 1}/${MAX_ATTEMPTS} in ${Math.round(delay / 1000)}s (exponential backoff)` });
       await patch(id, {
         status: "queued",
         attempts,
         pending: [],
-        scheduledFor: Date.now() + RETRY_DELAY_MS,
+        scheduledFor: Date.now() + delay,
       });
       await releaseLease(id); // free it for re-claim (possibly by another worker)
-      logT(id, "running → queued", `auto-retry ${attempts + 1}/${MAX_ATTEMPTS} after: ${msg.slice(0, 80)}`);
+      logT(id, "running → queued", `auto-retry ${attempts + 1}/${MAX_ATTEMPTS} in ${Math.round(delay / 1000)}s (exp backoff) after: ${msg.slice(0, 60)}`);
     } else {
       await patch(id, { status: "failed", attempts, result: msg });
       await clearApi(id);
