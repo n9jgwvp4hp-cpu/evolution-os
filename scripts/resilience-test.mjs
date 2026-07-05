@@ -21,11 +21,19 @@ const BASE = process.env.BASE_URL || "https://evolution-os-dlfmv.ondigitalocean.
 const APP = "21dfe73b-1b88-4f85-b151-14bc047b49c6";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Resilient fetch: a long test must survive transient client-side blips
+// (ECONNRESET, DNS hiccups) without dying — retry a few times before giving up.
+async function rfetch(url, opts, tries = 4) {
+  for (let i = 0; i < tries; i++) {
+    try { return await fetch(url, opts); }
+    catch (e) { if (i === tries - 1) throw e; await sleep(1500 * (i + 1)); }
+  }
+}
 const doToken = () => readFileSync(`${homedir()}/Library/Application Support/doctl/config.yaml`, "utf8").match(/access-token:\s*(\S+)/)[1];
-const doApi = (p, opts) => fetch(`https://api.digitalocean.com/v2/apps/${APP}${p}`, {
+const doApi = (p, opts) => rfetch(`https://api.digitalocean.com/v2/apps/${APP}${p}`, {
   ...opts, headers: { Authorization: `Bearer ${doToken()}`, "Content-Type": "application/json", ...(opts?.headers || {}) },
 }).then((r) => r.json());
-async function j(path, opts) { const r = await fetch(BASE + path, opts); return r.json().catch(() => null); }
+async function j(path, opts) { const r = await rfetch(BASE + path, opts); return r.json().catch(() => null); }
 const list = async () => (await j("/api/missions")).missions;
 const create = async (b) => (await j("/api/missions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) })).id;
 const phaseOf = async (dep) => (await doApi(`/deployments/${dep}`)).deployment.phase;

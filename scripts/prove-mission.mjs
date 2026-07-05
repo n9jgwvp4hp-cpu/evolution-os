@@ -17,8 +17,8 @@ async function j(path, opts) { const r = await rfetch(BASE + path, opts); return
 const t = (ts) => new Date(ts).toISOString().slice(11, 19);
 
 (async () => {
-  const title = `Milestone 5 Proof ${Date.now()}`;
-  const objective = `Create a note titled "${title}" whose body lists three concrete benefits of a persistent, always-on AI operating system. Then report what you did.`;
+  const title = `Milestone 5 Verified ${Date.now()}`;
+  const objective = `Add a task titled "${title}" with priority high. Then report the exact title and priority of the task you created.`;
   console.log("EVOLUTION OS — ONE COMPLETE MISSION, CREATION → COMPLETION\n");
   console.log("BASE:", BASE);
   console.log("OBJECTIVE:", objective, "\n");
@@ -47,11 +47,11 @@ const t = (ts) => new Date(ts).toISOString().slice(11, 19);
   console.log(m?.result || "(none)");
 
   // prove the real side effect
-  const note = (await j("/api/data/notes")).items.find((n) => n.title === title);
-  console.log("\n────────── REAL SIDE EFFECT (note written to the brain) ──────────");
-  console.log(note ? `note "${note.title}":\n${note.body}` : "NOTE NOT FOUND");
+  const task = (await j("/api/data/tasks")).items.find((n) => n.title === title);
+  console.log("\n────────── REAL SIDE EFFECT (task written to the brain) ──────────");
+  console.log(task ? `task "${task.title}" | priority: ${task.priority} | done: ${task.done} | id: ${task.id}` : "TASK NOT FOUND");
 
-  const success = m?.status === "done" && !!note;
+  const success = m?.status === "done" && !!task;
   console.log(`\n${success ? "✅ MILESTONE 5 PROVEN: one complete mission executed creation → completion." : "❌ mission did not complete"}`);
   process.exit(success ? 0 : 1);
 })();
