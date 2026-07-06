@@ -27,15 +27,26 @@ export async function replaceKind(kind: BrainKind, items: any[]) {
 
 /* ---- semantic capabilities (conversation + missions) ---- */
 export async function createTask(a: any) {
-  const task: Task = {
-    id: uid(),
-    title: String(a.title),
-    done: false,
-    priority: (a.priority as Task["priority"]) || "medium",
-    createdAt: Date.now(),
-  };
-  await mutate((db) => db.tasks.unshift(task));
-  return { ok: true, created: task.title };
+  // Idempotent by open-title: never create a second OPEN task with the same
+  // title. This makes repeated work safe — the recurring kernel briefing (which
+  // runs every few hours) can propose "Reply to X" every time without piling up
+  // duplicates, regardless of whether the model remembers to check first.
+  const title = String(a.title);
+  let existed = false;
+  await mutate((db) => {
+    const dup = db.tasks.find((t) => !t.done && t.title.trim().toLowerCase() === title.trim().toLowerCase());
+    if (dup) { existed = true; return; }
+    db.tasks.unshift({
+      id: uid(),
+      title,
+      done: false,
+      priority: (a.priority as Task["priority"]) || "medium",
+      createdAt: Date.now(),
+    });
+  });
+  return existed
+    ? { ok: true, existing: title, note: "An open task with this title already exists — not duplicated." }
+    : { ok: true, created: title };
 }
 
 export async function completeTask(a: any) {
