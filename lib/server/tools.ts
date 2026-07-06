@@ -344,9 +344,11 @@ export const SERVER_TOOLS: ServerTool[] = [
       const subject = a.subject || "(no subject)";
       const { getServerAccessToken } = await import("@/lib/server/google");
       const { createNote } = await import("@/lib/server/data");
-      // Always keep a reviewable copy in the brain (idempotent by title) so the
-      // draft is never lost — and so this works even without the gmail.compose scope.
-      const noteTitle = `✉️ Draft: ${subject} → ${a.to}`;
+      // Always keep a reviewable copy in the brain so the draft is never lost —
+      // and so this works even without the gmail.compose scope. Keyed by RECIPIENT
+      // (stable) so re-running doesn't create near-duplicate draft notes when the
+      // model phrases the subject slightly differently; create_note upserts by title.
+      const noteTitle = `✉️ Draft reply → ${a.to}`;
       await createNote({ title: noteTitle, body: `To: ${a.to}\nSubject: ${subject}\n\n${a.body || ""}` });
       let token: string;
       try { token = await getServerAccessToken(); }
