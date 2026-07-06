@@ -171,6 +171,86 @@ export const SERVER_TOOLS: ServerTool[] = [
       }
     },
   },
+
+  // ---- Perception: read the user's world (read-only; the OS's "eyes") ----
+  {
+    name: "read_recent_email",
+    description:
+      "Read the user's recent Gmail messages (READ-ONLY) — sender, subject, date, and a snippet of each. " +
+      "Use this to PERCEIVE the inbox: new leads, client replies, things needing a response. The optional " +
+      "query uses Gmail search syntax (e.g. 'is:unread', 'newer_than:2d', 'from:zillow', 'is:important').",
+    parameters: obj(
+      { query: str("Gmail search query, e.g. 'is:unread newer_than:3d'. Defaults to recent unread."), max: num("How many messages, default 10, max 20") },
+      []
+    ),
+    summarize: (a) => `Read inbox${a.query ? ` (${a.query})` : ""}`,
+    async execute(a) {
+      const { getServerAccessToken } = await import("@/lib/server/google");
+      let token: string;
+      try { token = await getServerAccessToken(); }
+      catch { return { ok: false, error: "Google isn't connected, so I can't read the inbox. The user can connect it in Settings." }; }
+      const q = String(a.query || "is:unread newer_than:7d");
+      const max = Math.min(Number(a.max) || 10, 20);
+      try {
+        const listRes = await fetchWithTimeout(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${max}&q=${encodeURIComponent(q)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!listRes.ok) return { ok: false, error: "Gmail list failed: " + (await listRes.text()).slice(0, 200) };
+        const refs = (await listRes.json()).messages || [];
+        const messages: any[] = [];
+        for (const r of refs.slice(0, max)) {
+          const mRes = await fetchWithTimeout(
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${r.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (!mRes.ok) continue;
+          const md = await mRes.json();
+          const hdr: Record<string, string> = {};
+          for (const h of md.payload?.headers || []) hdr[h.name.toLowerCase()] = h.value;
+          messages.push({ from: hdr.from || "", subject: hdr.subject || "(no subject)", date: hdr.date || "", snippet: (md.snippet || "").slice(0, 240) });
+        }
+        return { ok: true, query: q, count: messages.length, messages };
+      } catch (e: any) {
+        return { ok: false, error: e?.name === "AbortError" ? "Gmail read timed out." : e?.message || "Read failed." };
+      }
+    },
+  },
+  {
+    name: "list_calendar",
+    description:
+      "List the user's upcoming Google Calendar events (READ-ONLY) — title, start, end, location. " +
+      "Use this to PERCEIVE the schedule: what's coming up, what to prepare for.",
+    parameters: obj({ days: num("How many days ahead, default 7"), max: num("Max events, default 10, max 25") }, []),
+    summarize: (a) => `List calendar (next ${a.days || 7}d)`,
+    async execute(a) {
+      const { getServerAccessToken } = await import("@/lib/server/google");
+      let token: string;
+      try { token = await getServerAccessToken(); }
+      catch { return { ok: false, error: "Google isn't connected, so I can't read the calendar. The user can connect it in Settings." }; }
+      const days = Math.min(Number(a.days) || 7, 60);
+      const max = Math.min(Number(a.max) || 10, 25);
+      const timeMin = new Date().toISOString();
+      const timeMax = new Date(Date.now() + days * 86_400_000).toISOString();
+      try {
+        const res = await fetchWithTimeout(
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=true&orderBy=startTime&maxResults=${max}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!res.ok) return { ok: false, error: "Calendar list failed: " + (await res.text()).slice(0, 200) };
+        const events = ((await res.json()).items || []).map((e: any) => ({
+          summary: e.summary || "(untitled)",
+          start: e.start?.dateTime || e.start?.date,
+          end: e.end?.dateTime || e.end?.date,
+          location: e.location || "",
+        }));
+        return { ok: true, days, count: events.length, events };
+      } catch (e: any) {
+        return { ok: false, error: e?.name === "AbortError" ? "Calendar read timed out." : e?.message || "Read failed." };
+      }
+    },
+  },
+
   {
     name: "send_email",
     description:

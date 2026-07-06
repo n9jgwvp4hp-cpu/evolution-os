@@ -2,6 +2,7 @@ import { uid, dbBackend, setWorkerHeartbeat } from "@/lib/server/db";
 import {
   createMissionRow,
   getMission,
+  listMissionViews,
   listRunnable,
   claimMission,
   extendLease,
@@ -469,6 +470,44 @@ export async function approveMission(id: string, approved: boolean) {
 // mission store so it's a single indexed DELETE, not a whole-store rewrite.)
 const MISSION_CAP = 1000;
 
+/* ---- the autonomous kernel: the OS's own heartbeat ----
+ *
+ * Turns Evolution OS from reactive (runs only what a human types) into an
+ * operating system that works for you: on a schedule it PERCEIVES your world
+ * (inbox, calendar, brain state), DECIDES what needs attention, and SURFACES a
+ * briefing + concrete follow-ups — reusing the same persistent, exactly-once
+ * mission engine. It only OBSERVES and surfaces; any outward action still runs
+ * as a separate, authorized mission. Opt-in (ongoing model spend), so it stays
+ * off until KERNEL_ENABLED=true; cadence via KERNEL_EVERY_MIN (default daily). */
+const KERNEL_MARKER = "[KERNEL] Autonomous briefing";
+const KERNEL_EVERY_MS = Math.max(5, Number(process.env.KERNEL_EVERY_MIN) || 1440) * 60_000;
+const KERNEL_OBJECTIVE =
+  `${KERNEL_MARKER}. You are Evolution OS's autonomous kernel running a periodic briefing. PERCEIVE the ` +
+  `user's world and SURFACE what needs attention — do NOT take outward actions (do not send email or create ` +
+  `calendar events), only observe, then record findings.\n` +
+  `Steps: (1) read_recent_email for unread/important mail from the last ~2 days and note anyone who appears to ` +
+  `need a reply (leads, clients). (2) list_calendar for the next ~2 days and note what to prepare for. ` +
+  `(3) Consider open tasks, hot leads, and deals that may be going cold. Then create_task for concrete ` +
+  `follow-ups the user should do, save_memory for anything durable you learned, and create_note titled ` +
+  `"Briefing" with a short, prioritized summary. Finally report the top 3 things needing attention. ` +
+  `If Google isn't connected, say so plainly and brief on the internal brain state instead.`;
+
+/** Seed the recurring kernel briefing once, if enabled and not already present. */
+async function ensureKernel() {
+  if (process.env.KERNEL_ENABLED !== "true") return;
+  const views = await listMissionViews();
+  const live = views.some(
+    (v) => v.objective.startsWith(KERNEL_MARKER) && v.status !== "done" && v.status !== "failed"
+  );
+  if (live) return;
+  await createMission(KERNEL_OBJECTIVE, {
+    recurrence: { everyMs: KERNEL_EVERY_MS },
+    scheduledFor: Date.now() + 60_000,
+  });
+  // eslint-disable-next-line no-console
+  console.log(`[Evolution OS] autonomous kernel seeded (briefing every ${Math.round(KERNEL_EVERY_MS / 60_000)}m)`);
+}
+
 /* ---- background worker ---- */
 let workerStarted = false;
 const inflight = new Set<string>();
@@ -484,6 +523,7 @@ export function startWorker() {
   // Shrink any historical bloat once on boot (non-blocking).
   trimTerminalApi().catch(() => {});
   storePrune(MISSION_CAP).catch(() => {});
+  ensureKernel().catch(() => {}); // the OS's heartbeat (opt-in via KERNEL_ENABLED)
 
   const claim = (id: string) => {
     inflight.add(id);
