@@ -22,6 +22,7 @@ export const GOOGLE_SCOPES = [
   "profile",
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.compose", // create drafts (draft_email) — reconnect Google to grant
   "https://www.googleapis.com/auth/calendar",
 ];
 

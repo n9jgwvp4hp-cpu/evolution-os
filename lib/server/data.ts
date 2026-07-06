@@ -60,21 +60,34 @@ export async function completeTask(a: any) {
 }
 
 export async function addContact(a: any) {
-  const contact: Contact = {
-    id: uid(),
-    name: String(a.name),
-    email: a.email || "",
-    phone: a.phone || "",
-    type: (a.type as Contact["type"]) || "other",
-    status: (a.status as LeadStatus) || "new",
-    source: a.source || "",
-    budget: Number(a.budget) || 0,
-    notes: a.notes || "",
-    lastTouch: Date.now(),
-    createdAt: Date.now(),
-  };
-  await mutate((db) => db.contacts.unshift(contact));
-  return { ok: true, created: contact.name };
+  // Upsert by name: idempotent CRM. If the person already exists, UPDATE the
+  // provided fields and touch lastTouch (so the recurring kernel can keep records
+  // current every run without creating duplicates); otherwise create them.
+  const name = String(a.name);
+  let updated = false;
+  await mutate((db) => {
+    const ex = db.contacts.find((c) => c.name.trim().toLowerCase() === name.trim().toLowerCase());
+    if (ex) {
+      if (a.email) ex.email = a.email;
+      if (a.phone) ex.phone = a.phone;
+      if (a.type) ex.type = a.type as Contact["type"];
+      if (a.status) ex.status = a.status as LeadStatus;
+      if (a.source) ex.source = a.source;
+      if (a.budget != null && Number(a.budget)) ex.budget = Number(a.budget);
+      if (a.notes) ex.notes = a.notes;
+      ex.lastTouch = Date.now();
+      updated = true;
+    } else {
+      db.contacts.unshift({
+        id: uid(), name, email: a.email || "", phone: a.phone || "",
+        type: (a.type as Contact["type"]) || "other",
+        status: (a.status as LeadStatus) || "new",
+        source: a.source || "", budget: Number(a.budget) || 0, notes: a.notes || "",
+        lastTouch: Date.now(), createdAt: Date.now(),
+      });
+    }
+  });
+  return updated ? { ok: true, updated: name } : { ok: true, created: name };
 }
 
 export async function createDeal(a: any) {
@@ -113,15 +126,19 @@ export async function updateDealStage(a: any) {
 }
 
 export async function saveMemory(a: any) {
-  const mem: Memory = {
-    id: uid(),
-    text: String(a.text),
-    category: (a.category as Memory["category"]) || "fact",
-    pinned: false,
-    createdAt: Date.now(),
-  };
-  await mutate((db) => db.memories.unshift(mem));
-  return { ok: true, remembered: mem.text };
+  // Idempotent by text: never store the same fact twice, so the recurring kernel
+  // doesn't accumulate duplicate memories every run.
+  const text = String(a.text);
+  let existed = false;
+  await mutate((db) => {
+    if (db.memories.some((m) => m.text.trim().toLowerCase() === text.trim().toLowerCase())) { existed = true; return; }
+    db.memories.unshift({
+      id: uid(), text,
+      category: (a.category as Memory["category"]) || "fact",
+      pinned: false, createdAt: Date.now(),
+    });
+  });
+  return existed ? { ok: true, existing: text } : { ok: true, remembered: text };
 }
 
 export async function forgetMemory(a: any) {

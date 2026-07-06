@@ -482,18 +482,25 @@ const MISSION_CAP = 1000;
 const KERNEL_MARKER = "[KERNEL] Autonomous briefing";
 const KERNEL_EVERY_MS = Math.max(5, Number(process.env.KERNEL_EVERY_MIN) || 1440) * 60_000;
 const KERNEL_OBJECTIVE =
-  `${KERNEL_MARKER}. You are Evolution OS's autonomous kernel running a periodic briefing. PERCEIVE the ` +
-  `user's world and SURFACE what needs attention — do NOT take outward actions (do not send email or create ` +
-  `calendar events), only observe, then record findings.\n` +
-  `Steps: (1) read_recent_email for unread/important mail from the last ~2 days and note anyone who appears to ` +
-  `need a reply (leads, clients). (2) list_calendar for the next ~2 days and note what to prepare for. ` +
-  `(3) Consider open tasks, hot leads, and deals that may be going cold. ` +
-  `IMPORTANT — you run repeatedly, so do NOT create duplicates: before adding any task, first use ` +
-  `search_data to check whether an equivalent open follow-up already exists, and only create_task for a ` +
-  `genuinely NEW follow-up. Update the single note titled "Briefing" (create_note upserts by title) with a ` +
-  `short, current, prioritized summary. save_memory only for durable facts worth remembering. ` +
-  `Finally report the top 3 things needing attention. ` +
-  `If Google isn't connected, say so plainly and brief on the internal brain state instead.`;
+  `${KERNEL_MARKER}. You are Evolution OS's autonomous kernel. PERCEIVE the user's world, then EXECUTE the ` +
+  `safe work — but NEVER commit anything outward without review: do NOT use send_email or ` +
+  `create_calendar_event. All your operations are idempotent, so it is safe to run every few hours.\n` +
+  `Do this:\n` +
+  `1. read_recent_email (unread, last ~2 days) and list_calendar (next ~2 days) to perceive what's happening.\n` +
+  `2. For each email that clearly needs a reply (a lead or client), draft_email a concise, professional reply ` +
+  `(this DRAFTS only — it never sends).\n` +
+  `3. Summarize important emails and upcoming meetings into notes with create_note (e.g. a note titled ` +
+  `"Summary: <subject or meeting>"). Keep them concise.\n` +
+  `4. Update the CRM with add_contact for any lead/client you interacted with (it upserts by name — updates ` +
+  `status/notes and touches the record; safe to repeat).\n` +
+  `5. If a meeting or follow-up should be scheduled, suggest_calendar_event (this QUEUES a suggestion for the ` +
+  `user to approve — it does NOT create the event).\n` +
+  `6. create_task for concrete follow-ups the user must do personally.\n` +
+  `7. Update the single note titled "Briefing" (upserts by title) with a short, current, prioritized summary ` +
+  `of what you did (drafts prepared, summaries written, CRM updates, calendar suggestions) and what needs the ` +
+  `user's attention.\n` +
+  `Finally, report: the top 3 priorities, and a list of the autonomous actions you took. ` +
+  `If Google isn't connected, say so plainly and work from the internal brain state instead.`;
 
 /** Seed the recurring kernel briefing once, if enabled and not already present. */
 async function ensureKernel() {

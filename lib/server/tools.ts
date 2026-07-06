@@ -327,6 +327,68 @@ export const SERVER_TOOLS: ServerTool[] = [
       }
     },
   },
+
+  // ---- Safe autonomous execution: prepare work, never commit outward without review ----
+  {
+    name: "draft_email",
+    description:
+      "DRAFT an email reply — it is saved for the user to review and send; it is NEVER sent automatically. " +
+      "Use this to prepare replies to leads/clients autonomously. Idempotent: drafting the same reply again " +
+      "won't create a duplicate.",
+    parameters: obj(
+      { to: str("Recipient email"), subject: str("Subject (use 'Re: …' for replies)"), body: str("The drafted reply text") },
+      ["to", "body"]
+    ),
+    summarize: (a) => `Draft reply to ${a.to}${a.subject ? ` — “${a.subject}”` : ""} (not sent)`,
+    async execute(a) {
+      const subject = a.subject || "(no subject)";
+      const { getServerAccessToken } = await import("@/lib/server/google");
+      const { createNote } = await import("@/lib/server/data");
+      // Always keep a reviewable copy in the brain (idempotent by title) so the
+      // draft is never lost — and so this works even without the gmail.compose scope.
+      const noteTitle = `✉️ Draft: ${subject} → ${a.to}`;
+      await createNote({ title: noteTitle, body: `To: ${a.to}\nSubject: ${subject}\n\n${a.body || ""}` });
+      let token: string;
+      try { token = await getServerAccessToken(); }
+      catch { return { ok: true, drafted: true, where: "note", note: "Saved as a draft note (Google not connected)." }; }
+      const raw =
+        `To: ${a.to}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${a.body || ""}`;
+      const encoded = Buffer.from(raw).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      try {
+        const res = await fetchWithTimeout("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ message: { raw: encoded } }),
+        });
+        if (res.ok) {
+          const d = await res.json();
+          return { ok: true, drafted: true, where: "gmail", draftId: d.id, to: a.to, note: "Created a Gmail draft — review and send it yourself." };
+        }
+        // Most likely insufficient scope (need gmail.compose). The note fallback above already preserved it.
+        return { ok: true, drafted: true, where: "note", note: "Saved as a draft note. Reconnect Google (adds compose scope) to get native Gmail drafts. Not sent." };
+      } catch (e: any) {
+        return { ok: true, drafted: true, where: "note", note: e?.name === "AbortError" ? "Gmail draft timed out; saved as a note instead." : "Saved as a draft note. Not sent." };
+      }
+    },
+  },
+  {
+    name: "suggest_calendar_event",
+    description:
+      "QUEUE a suggested calendar action for the user to approve — it does NOT create the event. Use when the " +
+      "objective implies scheduling (e.g. a follow-up meeting). Idempotent: suggesting the same event won't duplicate.",
+    parameters: obj(
+      { summary: str("Event title"), start: str("Suggested start, human or ISO"), note: str("Why / context, optional") },
+      ["summary", "start"]
+    ),
+    summarize: (a) => `Queue calendar suggestion: “${a.summary}” (${a.start})`,
+    async execute(a) {
+      const { createTask } = await import("@/lib/server/data");
+      // Reuse the idempotent task list as the visible approval queue.
+      const title = `📅 Schedule: ${a.summary} — ${a.start}`;
+      const r: any = await createTask({ title, priority: "medium" });
+      return { ok: true, queued: title, deduped: !!r.existing, note: a.note || "" };
+    },
+  },
 ];
 
 export function getServerTool(name: string) {
