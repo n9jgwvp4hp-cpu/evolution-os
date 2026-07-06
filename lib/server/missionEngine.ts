@@ -502,20 +502,24 @@ const KERNEL_OBJECTIVE =
   `Finally, report: the top 3 priorities, and a list of the autonomous actions you took. ` +
   `If Google isn't connected, say so plainly and work from the internal brain state instead.`;
 
-/** Seed the recurring kernel briefing once, if enabled and not already present. */
+/** Ensure exactly one recurring kernel briefing with the CURRENT objective is
+ *  live (if enabled). Retires a stale kernel from a previous deploy so objective
+ *  updates take effect — missions store their objective at creation, so a
+ *  recurring one would otherwise re-spawn the old workflow forever. */
 async function ensureKernel() {
   if (process.env.KERNEL_ENABLED !== "true") return;
   const views = await listMissionViews();
-  const live = views.some(
+  const liveKernels = views.filter(
     (v) => v.objective.startsWith(KERNEL_MARKER) && v.status !== "done" && v.status !== "failed"
   );
-  if (live) return;
+  if (liveKernels.some((v) => v.objective === KERNEL_OBJECTIVE)) return; // already current
+  for (const v of liveKernels) await cancelMission(v.id); // retire stale/duplicate kernels
   await createMission(KERNEL_OBJECTIVE, {
     recurrence: { everyMs: KERNEL_EVERY_MS },
     scheduledFor: Date.now() + 60_000,
   });
   // eslint-disable-next-line no-console
-  console.log(`[Evolution OS] autonomous kernel seeded (briefing every ${Math.round(KERNEL_EVERY_MS / 60_000)}m)`);
+  console.log(`[Evolution OS] autonomous kernel (re)seeded with current objective (every ${Math.round(KERNEL_EVERY_MS / 60_000)}m)`);
 }
 
 /* ---- background worker ---- */
