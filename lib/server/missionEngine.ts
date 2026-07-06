@@ -487,9 +487,12 @@ const KERNEL_OBJECTIVE =
   `calendar events), only observe, then record findings.\n` +
   `Steps: (1) read_recent_email for unread/important mail from the last ~2 days and note anyone who appears to ` +
   `need a reply (leads, clients). (2) list_calendar for the next ~2 days and note what to prepare for. ` +
-  `(3) Consider open tasks, hot leads, and deals that may be going cold. Then create_task for concrete ` +
-  `follow-ups the user should do, save_memory for anything durable you learned, and create_note titled ` +
-  `"Briefing" with a short, prioritized summary. Finally report the top 3 things needing attention. ` +
+  `(3) Consider open tasks, hot leads, and deals that may be going cold. ` +
+  `IMPORTANT — you run repeatedly, so do NOT create duplicates: before adding any task, first use ` +
+  `search_data to check whether an equivalent open follow-up already exists, and only create_task for a ` +
+  `genuinely NEW follow-up. Update the single note titled "Briefing" (create_note upserts by title) with a ` +
+  `short, current, prioritized summary. save_memory only for durable facts worth remembering. ` +
+  `Finally report the top 3 things needing attention. ` +
   `If Google isn't connected, say so plainly and brief on the internal brain state instead.`;
 
 /** Seed the recurring kernel briefing once, if enabled and not already present. */
