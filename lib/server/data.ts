@@ -1,5 +1,5 @@
 import { mutate, read, uid } from "@/lib/server/db";
-import type { Task, Contact, Deal, Note, Memory, LeadStatus, DealStage, BrainKind } from "@/lib/types";
+import type { Task, Contact, Deal, Note, Memory, Priority, LeadStatus, DealStage, BrainKind } from "@/lib/types";
 
 /**
  * The brain's write/read operations — one source of truth for every entity.
@@ -9,9 +9,57 @@ import type { Task, Contact, Deal, Note, Memory, LeadStatus, DealStage, BrainKin
  * through /api/data. There is exactly one persistent brain.
  */
 
-const KINDS: BrainKind[] = ["tasks", "contacts", "deals", "notes", "memories"];
+const KINDS: BrainKind[] = ["tasks", "contacts", "deals", "notes", "memories", "priorities"];
 export function isBrainKind(k: string): k is BrainKind {
   return (KINDS as string[]).includes(k);
+}
+
+/**
+ * Rebuild the unified Priority Queue from ranked items the kernel produced.
+ * Ranking is DETERMINISTIC and explainable: score is derived from importance,
+ * urgency, deadline proximity, and whether the item is blocked by a dependency —
+ * not from the model's own ordering. Replaces the queue each cycle (idempotent;
+ * always reflects the latest analysis). Every item must carry a `why`.
+ */
+export async function setPriorities(a: any) {
+  const clamp = (n: any) => Math.max(1, Math.min(5, Math.round(Number(n) || 3)));
+  const deadlineBoost = (iso?: string): number => {
+    if (!iso) return 0;
+    const t = Date.parse(iso);
+    if (isNaN(t)) return 0;
+    const days = (t - Date.now()) / 86_400_000;
+    if (days < 0) return 40;   // overdue
+    if (days <= 1) return 30;  // today / tomorrow
+    if (days <= 3) return 20;
+    if (days <= 7) return 10;
+    return 5;
+  };
+  const now = Date.now();
+  const items: Priority[] = (Array.isArray(a.items) ? a.items : [])
+    .filter((it: any) => it && it.title && it.why) // a recommendation MUST explain why
+    .slice(0, 25)
+    .map((it: any): Priority => {
+      const urgency = clamp(it.urgency);
+      const importance = clamp(it.importance);
+      const blocked = Boolean(it.dependsOn && String(it.dependsOn).trim());
+      const score = importance * 20 + urgency * 20 + deadlineBoost(it.deadline) - (blocked ? 15 : 0);
+      return {
+        id: uid(),
+        title: String(it.title).slice(0, 200),
+        category: (["email", "calendar", "crm", "mission", "task", "other"].includes(it.category) ? it.category : "other") as Priority["category"],
+        urgency, importance,
+        deadline: it.deadline ? String(it.deadline) : undefined,
+        dependsOn: blocked ? String(it.dependsOn) : undefined,
+        score,
+        recommendedAction: String(it.recommendedAction || "").slice(0, 300),
+        why: String(it.why).slice(0, 400),
+        source: String(it.source || "").slice(0, 120),
+        createdAt: now, updatedAt: now,
+      };
+    })
+    .sort((x: Priority, y: Priority) => y.score - x.score);
+  await mutate((db) => { db.priorities = items; });
+  return { ok: true, ranked: items.length, top: items.slice(0, 5).map((p) => ({ score: p.score, title: p.title, why: p.why })) };
 }
 
 /* ---- generic collection access (module views) ---- */

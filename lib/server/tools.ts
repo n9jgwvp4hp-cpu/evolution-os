@@ -408,6 +408,67 @@ export const SERVER_TOOLS: ServerTool[] = [
       return { ok: true, queued: title, deduped: !!r.existing, note: a.note || "" };
     },
   },
+
+  // ---- Executive assistant: perceive pending work + publish the ranked Priority Queue ----
+  {
+    name: "list_pending_work",
+    description:
+      "Read the user's PENDING WORK to factor into prioritization: open tasks, and active missions (queued / " +
+      "running / waiting-for-approval). Read-only.",
+    parameters: obj({}, []),
+    summarize: () => "Review pending work (tasks + active missions)",
+    async execute() {
+      const { listKind } = await import("@/lib/server/data");
+      const { listMissionViews } = await import("@/lib/server/missionStore");
+      const tasks = (await listKind("tasks")).filter((t: any) => !t.done).map((t: any) => ({ title: t.title, priority: t.priority }));
+      const missions = (await listMissionViews())
+        .filter((m: any) => ["queued", "running", "needs_approval"].includes(m.status))
+        .slice(0, 25)
+        .map((m: any) => ({ status: m.status, objective: String(m.objective).slice(0, 120) }));
+      return { ok: true, openTasks: tasks.length, tasks: tasks.slice(0, 40), activeMissions: missions.length, missions };
+    },
+  },
+  {
+    name: "set_priorities",
+    description:
+      "Publish the unified PRIORITY QUEUE: the full ranked list of what the user should focus on, rebuilt from " +
+      "your analysis of Gmail, Calendar, CRM, missions, and pending work. This REPLACES the queue each cycle. " +
+      "For EACH item provide urgency (1-5), importance (1-5), an optional deadline (ISO) and dependsOn, a " +
+      "concrete recommendedAction, and a REQUIRED `why` explaining why it surfaced now. Ranking (score) is " +
+      "computed for you from these signals.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["items"],
+      properties: {
+        items: {
+          type: "array",
+          description: "The ranked work items (max 25).",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["title", "recommendedAction", "why"],
+            properties: {
+              title: str("Short title of the work item"),
+              category: enm(["email", "calendar", "crm", "mission", "task", "other"], "What kind of work"),
+              urgency: num("Time pressure, 1-5"),
+              importance: num("Impact if done / cost if missed, 1-5"),
+              deadline: str("ISO date if there's a hard deadline, optional"),
+              dependsOn: str("What blocks this item, optional"),
+              recommendedAction: str("The concrete next action to take"),
+              why: str("REQUIRED: why this surfaced now"),
+              source: str("Where it came from, e.g. 'gmail:eric@…', 'deal:123 Main St'"),
+            },
+          },
+        },
+      },
+    },
+    summarize: (a) => `Publish Priority Queue (${(a.items || []).length} ranked items)`,
+    async execute(a) {
+      const { setPriorities } = await import("@/lib/server/data");
+      return setPriorities(a);
+    },
+  },
 ];
 
 export function getServerTool(name: string) {

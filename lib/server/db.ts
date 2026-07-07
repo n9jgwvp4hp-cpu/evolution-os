@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { Pool, type PoolClient } from "pg";
-import type { Task, Contact, Deal, Note, Memory } from "@/lib/types";
+import type { Task, Contact, Deal, Note, Memory, Priority } from "@/lib/types";
 
 /**
  * Evolution OS persistence — the server's durable source of truth.
@@ -36,6 +36,7 @@ export type Shape = {
   tasks: Task[];
   contacts: Contact[];
   deals: Deal[];
+  priorities: Priority[]; // executive-assistant Priority Queue (rebuilt each kernel cycle)
   google: GoogleTokens | null;
   workerHeartbeat: number | null; // last time the mission worker ticked
 };
@@ -46,6 +47,7 @@ const empty: Shape = {
   tasks: [],
   contacts: [],
   deals: [],
+  priorities: [],
   google: null,
   workerHeartbeat: null,
 };
