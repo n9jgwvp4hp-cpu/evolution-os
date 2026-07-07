@@ -10,7 +10,8 @@
     "lint": "next lint",
     "e2e": "node scripts/e2e.mjs",
     "stress": "node scripts/stress.mjs",
-    "verify": "node scripts/verify.mjs"
+    "verify": "node scripts/verify.mjs",
+    "verify:engine": "node scripts/verify-engine.mjs"
   },
   "engines": {
     "node": ">=20 <23"
