@@ -74,6 +74,14 @@ const patch = (id: string, p: Partial<Mission>) => patchMission(id, p);
 const addStep = (id: string, step: Omit<MissionStep, "id" | "ts">) => storeAddStep(id, step);
 const pushApi = (id: string, msg: MissionApiMsg) => storePushApi(id, msg);
 
+/** Append a durable, timestamped STATUS entry to the mission log (Queued /
+ *  Running / Waiting / Completed / Failed) AND mirror it to the worker stdout
+ *  log. This is the persistent mission-status history. */
+async function logStatus(id: string, label: string, detail?: string) {
+  await addStep(id, { kind: "status", text: label, detail });
+  logT(id, `→ ${label}`, detail || "");
+}
+
 export async function createMission(
   objective: string,
   opts: { scheduledFor?: number; recurrence?: { everyMs: number } } = {}
@@ -84,6 +92,7 @@ export async function createMission(
     objective,
     status: "queued",
     steps: [
+      { id: uid(), ts: Date.now(), kind: "status", text: "Queued", detail: scheduled ? `scheduled for ${new Date(scheduled).toISOString()}` : undefined },
       {
         id: uid(),
         ts: Date.now(),
@@ -266,7 +275,7 @@ async function processCalls(id: string, calls: any[]): Promise<boolean> {
       }));
       await patch(id, { status: "needs_approval", pending });
       await addStep(id, { kind: "progress", text: "Waiting for your approval", detail: tool.summarize(parseArgs(call)) });
-      logT(id, "running → needs_approval");
+      await logStatus(id, "Waiting", "approval required");
       return true;
     }
     await executeCall(id, call, true);
@@ -352,7 +361,7 @@ async function finalize(id: string, candidate: string) {
   await patch(id, { status: "done", result: report, pending: [] });
   await clearApi(id);
   await releaseLease(id);
-  logT(id, "running → done");
+  await logStatus(id, "Completed");
 
   // Recurring missions queue their next run — but re-read first, so a mission
   // canceled mid-run (recurrence cleared) does NOT spawn another occurrence.
@@ -439,12 +448,12 @@ export async function runMission(id: string) {
         scheduledFor: Date.now() + delay,
       });
       await releaseLease(id); // free it for re-claim (possibly by another worker)
-      logT(id, "running → queued", `auto-retry ${attempts + 1}/${MAX_ATTEMPTS} in ${Math.round(delay / 1000)}s (exp backoff) after: ${msg.slice(0, 60)}`);
+      await logStatus(id, "Queued", `auto-retry ${attempts + 1}/${MAX_ATTEMPTS} in ${Math.round(delay / 1000)}s (exponential backoff) after: ${msg.slice(0, 60)}`);
     } else {
       await patch(id, { status: "failed", attempts, result: msg });
       await clearApi(id);
       await releaseLease(id);
-      logT(id, "running → failed", `${attempts} attempts exhausted`);
+      await logStatus(id, "Failed", `${attempts} attempts exhausted`);
     }
   }
 }
@@ -574,8 +583,8 @@ export function startWorker() {
         if (won) {
           // status 'running' here means the previous worker died mid-execution
           // and we're reclaiming its lapsed lease — i.e. recovery after interrupt.
-          if (m.status === "running") logT(m.id, "running → running", `RECOVERED after interruption; resuming on worker ${WORKER_ID}`);
-          else logT(m.id, "queued → running", `worker ${WORKER_ID}`);
+          if (m.status === "running") await logStatus(m.id, "Running", `recovered after interruption; resuming on worker ${WORKER_ID}`);
+          else await logStatus(m.id, "Running", `worker ${WORKER_ID}`);
           claim(m.id);
         }
       }

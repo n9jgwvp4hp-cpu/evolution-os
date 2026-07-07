@@ -14,7 +14,16 @@ export type MissionStatus =
   | "done"
   | "failed";
 
-export type MissionStepKind = "plan" | "progress" | "action" | "result" | "error";
+export type MissionStepKind = "plan" | "progress" | "action" | "result" | "error" | "status";
+
+/** Human-facing status labels used in the mission log (see logStatus). */
+export const STATUS_LABEL = {
+  queued: "Queued",
+  running: "Running",
+  needs_approval: "Waiting",
+  done: "Completed",
+  failed: "Failed",
+} as const;
 
 export type MissionStep = {
   id: string;
