@@ -13,7 +13,8 @@
     "verify": "node scripts/verify.mjs",
     "verify:engine": "node scripts/verify-engine.mjs",
     "verify:assistant": "node scripts/verify-assistant.mjs",
-    "verify:voice": "tsx scripts/verify-voice.ts"
+    "verify:voice": "tsx scripts/verify-voice.ts",
+    "verify:ops": "node scripts/verify-ops.mjs"
   },
   "engines": {
     "node": ">=20 <23"
