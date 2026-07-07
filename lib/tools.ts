@@ -114,6 +114,12 @@ export const TOOLS: Tool[] = [
     obj({ query: str("What to look for") }, ["query"]),
     (a) => `Search: “${a.query}”`),
 
+  brainTool("draft_email",
+    "Draft an email reply as a real Gmail draft (saved to Drafts for the user to review) — it is NEVER sent. " +
+    "Use when the user asks to draft/prepare a reply. To actually send, use send_email (which requires approval).",
+    obj({ to: str("Recipient email"), subject: str("Subject"), body: str("The drafted email text") }, ["to", "body"]),
+    (a) => `Draft email to ${a.to} (not sent)`),
+
   // ---- Sensitive, externally-visible: keep the approval gate ----
   {
     name: "send_email",

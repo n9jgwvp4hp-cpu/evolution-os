@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import AppShell from "@/components/AppShell";
+import VoiceAssistant from "@/components/VoiceAssistant";
 
 export const metadata: Metadata = {
   title: "Evolution OS",
@@ -43,6 +44,8 @@ export default function RootLayout({
       </head>
       <body className="min-h-screen font-sans antialiased">
         <AppShell>{children}</AppShell>
+        {/* Persistent voice interface, available on every page (hidden on the root chat, which has its own). */}
+        <VoiceAssistant />
       </body>
     </html>
   );
