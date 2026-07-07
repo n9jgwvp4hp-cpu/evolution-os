@@ -332,44 +332,61 @@ export const SERVER_TOOLS: ServerTool[] = [
   {
     name: "draft_email",
     description:
-      "DRAFT an email reply — it is saved for the user to review and send; it is NEVER sent automatically. " +
-      "Use this to prepare replies to leads/clients autonomously. Idempotent: drafting the same reply again " +
-      "won't create a duplicate.",
+      "DRAFT an email reply as a real Gmail draft, saved to the user's Gmail Drafts for review — it is NEVER " +
+      "sent automatically. Use this to prepare replies to leads/clients autonomously. Idempotent: a draft to " +
+      "the same recipient with the same subject won't be created twice.",
     parameters: obj(
       { to: str("Recipient email"), subject: str("Subject (use 'Re: …' for replies)"), body: str("The drafted reply text") },
       ["to", "body"]
     ),
-    summarize: (a) => `Draft reply to ${a.to}${a.subject ? ` — “${a.subject}”` : ""} (not sent)`,
+    summarize: (a) => `Draft Gmail reply to ${a.to}${a.subject ? ` — “${a.subject}”` : ""} (not sent)`,
     async execute(a) {
       const subject = a.subject || "(no subject)";
+      const norm = (s: string) => s.toLowerCase().replace(/^(re:\s*)+/i, "").trim();
       const { getServerAccessToken } = await import("@/lib/server/google");
-      const { createNote } = await import("@/lib/server/data");
-      // Always keep a reviewable copy in the brain so the draft is never lost —
-      // and so this works even without the gmail.compose scope. Keyed by RECIPIENT
-      // (stable) so re-running doesn't create near-duplicate draft notes when the
-      // model phrases the subject slightly differently; create_note upserts by title.
-      const noteTitle = `✉️ Draft reply → ${a.to}`;
-      await createNote({ title: noteTitle, body: `To: ${a.to}\nSubject: ${subject}\n\n${a.body || ""}` });
       let token: string;
       try { token = await getServerAccessToken(); }
-      catch { return { ok: true, drafted: true, where: "note", note: "Saved as a draft note (Google not connected)." }; }
-      const raw =
-        `To: ${a.to}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${a.body || ""}`;
-      const encoded = Buffer.from(raw).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      catch { return { ok: false, error: "Google isn't connected. Connect it in Settings." }; }
+      const auth = { Authorization: `Bearer ${token}` };
       try {
+        // Idempotency: skip if a draft to this recipient + (normalized) subject already exists.
+        const listRes = await fetchWithTimeout("https://gmail.googleapis.com/gmail/v1/users/me/drafts?maxResults=25", { headers: auth });
+        if (listRes.ok) {
+          const drafts = (await listRes.json()).drafts || [];
+          for (const dr of drafts.slice(0, 25)) {
+            const g = await fetchWithTimeout(
+              `https://gmail.googleapis.com/gmail/v1/users/me/drafts/${dr.id}?format=metadata&metadataHeaders=To&metadataHeaders=Subject`,
+              { headers: auth }
+            );
+            if (!g.ok) continue;
+            const hdr: Record<string, string> = {};
+            for (const h of (await g.json()).message?.payload?.headers || []) hdr[h.name.toLowerCase()] = h.value;
+            if ((hdr.to || "").toLowerCase().includes(a.to.toLowerCase()) && norm(hdr.subject || "") === norm(subject)) {
+              return { ok: true, drafted: true, draftId: dr.id, to: a.to, deduped: true, note: "A matching Gmail draft already exists — not duplicated. Not sent." };
+            }
+          }
+        }
+        const raw = `To: ${a.to}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${a.body || ""}`;
+        const encoded = Buffer.from(raw).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
         const res = await fetchWithTimeout("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          headers: { ...auth, "Content-Type": "application/json" },
           body: JSON.stringify({ message: { raw: encoded } }),
         });
         if (res.ok) {
           const d = await res.json();
-          return { ok: true, drafted: true, where: "gmail", draftId: d.id, to: a.to, note: "Created a Gmail draft — review and send it yourself." };
+          return { ok: true, drafted: true, draftId: d.id, to: a.to, subject, note: "Created a Gmail draft — review and send it yourself. Not sent." };
         }
-        // Most likely insufficient scope (need gmail.compose). The note fallback above already preserved it.
-        return { ok: true, drafted: true, where: "note", note: "Saved as a draft note. Reconnect Google (adds compose scope) to get native Gmail drafts. Not sent." };
+        const errTxt = (await res.text()).slice(0, 300);
+        const scopeIssue = res.status === 403 || /insufficient|scope|permission|ACCESS_TOKEN_SCOPE/i.test(errTxt);
+        return {
+          ok: false,
+          error: scopeIssue
+            ? "Gmail draft permission not granted. Reconnect Google in Settings — the consent now includes the gmail.compose scope needed to create drafts."
+            : `Gmail draft failed (${res.status}): ${errTxt}`,
+        };
       } catch (e: any) {
-        return { ok: true, drafted: true, where: "note", note: e?.name === "AbortError" ? "Gmail draft timed out; saved as a note instead." : "Saved as a draft note. Not sent." };
+        return { ok: false, error: e?.name === "AbortError" ? "Gmail draft timed out." : e?.message || "Draft failed." };
       }
     },
   },
