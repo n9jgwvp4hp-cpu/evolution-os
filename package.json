@@ -12,7 +12,8 @@
     "stress": "node scripts/stress.mjs",
     "verify": "node scripts/verify.mjs",
     "verify:engine": "node scripts/verify-engine.mjs",
-    "verify:assistant": "node scripts/verify-assistant.mjs"
+    "verify:assistant": "node scripts/verify-assistant.mjs",
+    "verify:voice": "tsx scripts/verify-voice.ts"
   },
   "engines": {
     "node": ">=20 <23"
