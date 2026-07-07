@@ -16,6 +16,7 @@ type Item = { href: string; label: string; hint: string; icon: JSX.Element };
 const MODULES: Item[] = [
   { href: "/", label: "Assistant", hint: "Talk to Evolution OS", icon: <IconSpark /> },
   { href: "/dashboard", label: "Overview", hint: "Everything at a glance", icon: <IconGrid /> },
+  { href: "/ops", label: "Command Center", hint: "Live operations", icon: <IconPulse /> },
   { href: "/crm", label: "Contacts", hint: "People & leads", icon: <IconUsers /> },
   { href: "/pipeline", label: "Deals", hint: "Property pipeline", icon: <IconLayers /> },
   { href: "/tasks", label: "Tasks", hint: "To-dos", icon: <IconCheck /> },
@@ -128,6 +129,7 @@ function IconMenu() { return svg(<path d="M4 6h16M4 12h16M4 18h16" />); }
 function IconClose() { return svg(<path d="M18 6 6 18M6 6l12 12" />); }
 function IconSpark() { return svg(<><path d="M12 3v4M12 17v4M3 12h4M17 12h4" /><path d="M12 8a4 4 0 0 0 4 4 4 4 0 0 0-4 4 4 4 0 0 0-4-4 4 4 0 0 0 4-4z" /></>); }
 function IconGrid() { return svg(<><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>); }
+function IconPulse() { return svg(<path d="M3 12h4l3 8 4-16 3 8h4" />); }
 function IconUsers() { return svg(<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></>); }
 function IconLayers() { return svg(<><path d="M12 2 2 7l10 5 10-5z" /><path d="m2 17 10 5 10-5M2 12l10 5 10-5" /></>); }
 function IconCheck() { return svg(<><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>); }

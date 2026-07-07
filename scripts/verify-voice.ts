@@ -75,10 +75,10 @@ const say = (text: string) => agent([{ role: "user", content: text }]);
   console.log("\n[CMD] Spoken commands execute real work (agent path, text for speech)");
   const m1 = await say(`Start a background mission to research the top 3 coffee shops near downtown Miami and save a note. Reference VOICE-${TS}.`);
   const missionMade = m1.called.has("start_mission") || m1.called.has("schedule_mission");
-  REQ("Voice command creates a MISSION", missionMade, `agent called ${[...m1.called].join(",") || "—"}`);
+  REQ("Voice command creates a MISSION", missionMade, `agent called ${Array.from(m1.called).join(",") || "—"}`);
 
   const m2 = await say("Search everything you know for notes or contacts about coffee.");
-  REQ("Voice command QUERIES MEMORY", m2.called.has("search_data"), `agent called ${[...m2.called].join(",") || "—"}`);
+  REQ("Voice command QUERIES MEMORY", m2.called.has("search_data"), `agent called ${Array.from(m2.called).join(",") || "—"}`);
 
   const m3 = await say(`Add a new contact named "Voice Verify Buyer", a buyer with a budget of 500000.`);
   await sleep(1500);
