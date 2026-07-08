@@ -25,7 +25,8 @@
     "orchestrate:logs": "bash scripts/orchestratord.sh logs",
     "verify:queue": "node scripts/verify-mission-queue.mjs",
     "verify:tools": "node scripts/verify-tools.mjs",
-    "verify:events": "node scripts/verify-events.mjs"
+    "verify:events": "node scripts/verify-events.mjs",
+    "verify:hierarchy": "node scripts/verify-hierarchy.mjs"
   },
   "engines": {
     "node": ">=20 <23"

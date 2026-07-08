@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { Pool, type PoolClient } from "pg";
-import type { Task, Contact, Deal, Note, Memory, Priority, OrchestratorStatus, AutomationRule, TriggerEvent } from "@/lib/types";
+import type { Task, Contact, Deal, Note, Memory, Priority, OrchestratorStatus, AutomationRule, TriggerEvent, Identity, Vision, Objective } from "@/lib/types";
 
 /**
  * Evolution OS persistence — the server's durable source of truth.
@@ -31,6 +31,9 @@ export type GoogleTokens = {
 // brain collections; they don't churn per mission step, so a single-row JSONB is
 // still the right fit for them.
 export type Shape = {
+  identity: Identity | null; // who the user is + what they value (singleton)
+  visions: Vision[];         // long-term futures being built
+  objectives: Objective[];   // measurable outcomes supporting the visions
   memories: Memory[];
   notes: Note[];
   tasks: Task[];
@@ -45,6 +48,9 @@ export type Shape = {
 };
 
 const empty: Shape = {
+  identity: null,
+  visions: [],
+  objectives: [],
   memories: [],
   notes: [],
   tasks: [],

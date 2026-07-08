@@ -49,12 +49,14 @@ function initPg(): Promise<void> {
           recurrence_every_ms BIGINT,
           worker_id TEXT,
           lease_expires BIGINT,
+          objective_id TEXT,
           created_at BIGINT NOT NULL,
           updated_at BIGINT NOT NULL
         )`);
-      // Lease columns for pre-existing deployments (missions table already created).
+      // Columns for pre-existing deployments (missions table already created).
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS worker_id TEXT`);
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS lease_expires BIGINT`);
+      await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS objective_id TEXT`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_status_sched ON missions (status, scheduled_for)`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_created ON missions (created_at DESC)`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_lease ON missions (status, lease_expires)`);
@@ -118,14 +120,14 @@ async function insertMissionTx(client: PoolClient, m: Mission): Promise<void> {
   await client.query(
     `INSERT INTO missions
        (id, objective, status, result, qc_left, attempts, acknowledged, pending,
-        pending_decision, scheduled_for, recurrence_every_ms, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        pending_decision, scheduled_for, recurrence_every_ms, objective_id, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      ON CONFLICT (id) DO NOTHING`,
     [
       m.id, m.objective, m.status, m.result ?? null, m.qcLeft ?? 2, m.attempts ?? 0,
       Boolean(m.acknowledged), JSON.stringify(m.pending ?? []),
       m.pendingDecision === undefined ? null : m.pendingDecision,
-      m.scheduledFor ?? null, m.recurrence?.everyMs ?? null,
+      m.scheduledFor ?? null, m.recurrence?.everyMs ?? null, m.objectiveId ?? null,
       m.createdAt, m.updatedAt,
     ]
   );
@@ -157,6 +159,7 @@ function rowToMission(r: any, steps: MissionStep[], api: MissionApiMsg[]): Missi
     pendingDecision: r.pending_decision, // null | true | false
     scheduledFor: r.scheduled_for != null ? Number(r.scheduled_for) : undefined,
     recurrence: r.recurrence_every_ms != null ? { everyMs: Number(r.recurrence_every_ms) } : undefined,
+    objectiveId: r.objective_id ?? null,
     workerId: r.worker_id ?? undefined,
     leaseExpires: r.lease_expires != null ? Number(r.lease_expires) : undefined,
     createdAt: Number(r.created_at),
@@ -180,6 +183,7 @@ const PATCH_COLS: Record<string, { col: string; val: (v: any) => any }> = {
   pendingDecision: { col: "pending_decision", val: (v) => (v === undefined ? null : v) },
   scheduledFor: { col: "scheduled_for", val: (v) => v ?? null },
   recurrence: { col: "recurrence_every_ms", val: (v) => v?.everyMs ?? null },
+  objectiveId: { col: "objective_id", val: (v) => v ?? null },
 };
 
 /* ============================== File ============================== */

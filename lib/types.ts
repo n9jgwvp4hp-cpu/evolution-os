@@ -89,6 +89,52 @@ export type Memory = {
   createdAt: number;
 };
 
+/* =========================================================================
+ * The life-OS hierarchy: Identity → Vision → Objectives → Missions → Execution.
+ * Everything the OS does traces up to an Objective; every Objective supports a
+ * Vision; both are grounded in the user's Identity.
+ * ========================================================================= */
+
+/** IDENTITY — who the user is and what they value. A singleton. */
+export type Identity = {
+  name?: string;
+  roles?: string[];       // "Real-estate investor", "Founder of Prism44"
+  values?: string[];      // what matters to them
+  principles?: string[];  // how they operate / decide
+  bio?: string;           // free-form context the OS should always know
+  updatedAt: number;
+};
+
+/** VISION — a long-term future the user is building (a life/business pillar). */
+export type Vision = {
+  id: string;
+  title: string;          // "Build Prism44 into the leading …"
+  description: string;
+  horizon?: string;       // "3–5 years"
+  status: "active" | "paused" | "archived";
+  createdAt: number;
+  updatedAt: number;
+};
+
+/** OBJECTIVE — a measurable outcome that moves a Vision forward. Missions ladder
+ *  up to an Objective; the OS maintains its evolving `state` + `progress`. */
+export type Objective = {
+  id: string;
+  visionId: string | null; // the Vision it supports (traceability up)
+  title: string;           // "Grow Prism44 to $50k MRR"
+  description: string;
+  metric?: string;         // measurable dimension, e.g. "MRR"
+  target?: string;         // "$50,000/mo"
+  current?: string;        // latest known value
+  status: "active" | "paused" | "done";
+  priority: number;        // 1–5
+  state: string;           // OS-maintained evolving summary (updated by reasoning)
+  progress: number;        // 0–100, OS-estimated
+  createdAt: number;
+  updatedAt: number;
+  lastReviewedAt: number | null;
+};
+
 /**
  * A ranked item in the executive-assistant Priority Queue. The kernel produces
  * these each cycle by analyzing Gmail, Calendar, CRM, missions, and pending work.
@@ -97,6 +143,7 @@ export type Memory = {
  */
 export type Priority = {
   id: string;
+  objectiveId?: string | null; // the Objective this recommendation serves (traceability)
   title: string;
   category: "email" | "calendar" | "crm" | "mission" | "task" | "other";
   urgency: number; // 1–5 (time pressure)

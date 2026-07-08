@@ -29,7 +29,7 @@ function enrich(m: MissionView, now: number) {
   const last = steps[steps.length - 1];
   const actionCount = steps.filter((s) => s.kind === "action").length;
   return {
-    id: m.id, objective: m.objective, status: m.status,
+    id: m.id, objective: m.objective, objectiveId: m.objectiveId ?? null, status: m.status,
     createdAt: m.createdAt, updatedAt: m.updatedAt, startedAt, endedAt, durationMs,
     attempts: m.attempts || 0, stepCount: steps.length, actionCount,
     currentStep: last ? last.text : null, // what the mission is doing right now
@@ -75,6 +75,9 @@ export async function GET() {
       automationRules: db.automationRules || [],
       eventLog: db.eventLog || [],
       googleConnected: !!db.google,
+      identity: db.identity || null,
+      visions: db.visions || [],
+      objectives: db.objectives || [],
     })),
   ]);
 
@@ -117,6 +120,44 @@ export async function GET() {
     .sort((a, b) => b.ts - a.ts)
     .slice(0, 25);
 
+  // Hierarchy — Identity → Vision → Objectives → Missions. Every objective carries
+  // its parent vision and the live missions laddering up to it, so the OS can trace
+  // any unit of work back to the outcome (and vision) it serves.
+  const visionById = new Map<string, any>(brain.visions.map((v: any) => [v.id, v]));
+  const missionsByObjective = new Map<string, any[]>();
+  for (const m of all) {
+    if (!m.objectiveId) continue;
+    (missionsByObjective.get(m.objectiveId) || missionsByObjective.set(m.objectiveId, []).get(m.objectiveId)!).push(m);
+  }
+  const objectives = brain.objectives.map((o: any) => {
+    const ms = missionsByObjective.get(o.id) || [];
+    const vision = o.visionId ? visionById.get(o.visionId) || null : null;
+    return {
+      ...o,
+      vision: vision ? { id: vision.id, title: vision.title, status: vision.status } : null,
+      missionCounts: {
+        total: ms.length,
+        active: ms.filter((m) => ["running", "needs_approval"].includes(m.status)).length,
+        queued: ms.filter((m) => m.status === "queued").length,
+        done: ms.filter((m) => m.status === "done").length,
+        failed: ms.filter((m) => m.status === "failed").length,
+      },
+      missionIds: ms.map((m) => m.id),
+    };
+  });
+  const unlinkedMissions = all.filter((m) => !m.objectiveId && !m.isKernel).length;
+  const hierarchy = {
+    identity: brain.identity,
+    visions: brain.visions,
+    objectives,
+    counts: {
+      visions: brain.visions.length,
+      objectives: brain.objectives.length,
+      activeObjectives: brain.objectives.filter((o: any) => o.status === "active").length,
+      unlinkedMissions,
+    },
+  };
+
   const calendarActions = brain.tasks.filter((t: any) => !t.done && String(t.title).startsWith("📅")).map((t: any) => ({ title: t.title, createdAt: t.createdAt }));
   const awaitingApproval = active.filter((m) => m.status === "needs_approval");
 
@@ -132,6 +173,7 @@ export async function GET() {
       crm: { status: "ok", detail: `${brain.contacts.length} contacts · ${brain.deals.length} deals` },
       ai: { status: aiOk ? "ok" : "down", detail: aiOk ? "OpenAI configured" : "no API key" },
     },
+    hierarchy,
     kernel,
     orchestrator: brain.orchestrator,
     automations: {

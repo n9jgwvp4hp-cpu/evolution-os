@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
   const m = await createMission(String(objective).trim(), {
     scheduledFor: delayMinutes > 0 ? Date.now() + delayMinutes * 60_000 : undefined,
     recurrence: everyMinutes > 0 ? { everyMs: everyMinutes * 60_000 } : undefined,
+    objectiveId: body.objectiveId ? String(body.objectiveId) : null, // traceability up the hierarchy
   });
   return NextResponse.json({ id: m.id, status: m.status, scheduledFor: m.scheduledFor ?? null });
 }

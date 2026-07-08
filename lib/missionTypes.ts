@@ -47,6 +47,7 @@ export type PendingCall = { call: any; summary: string };
 export type Mission = {
   id: string;
   objective: string;
+  objectiveId?: string | null; // the Objective this mission ladders up to (traceability)
   status: MissionStatus;
   steps: MissionStep[];
   api: MissionApiMsg[]; // running model conversation — enables resume after restart
