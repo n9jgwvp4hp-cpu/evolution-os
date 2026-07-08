@@ -232,6 +232,61 @@ async function alreadyExecuted(id: string, name: string, args: any): Promise<boo
   return false;
 }
 
+/* ---- tool execution: automatic retry + output logging ---- */
+const sleepMs = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const TOOL_MAX_TRIES = 3;
+
+/** A tool failure is RECOVERABLE (worth an automatic retry) when it looks
+ *  transient — a timeout, network blip, rate limit, or upstream 5xx. Permanent
+ *  errors (bad input, "not connected", invalid URL) are NOT retried. */
+function recoverable(err: string): boolean {
+  return /timed out|timeout|network|ECONN|socket|fetch failed|temporar|rate limit|429|\b5\d\d\b|unavailable|reset|EAI_AGAIN/i.test(err || "");
+}
+
+/** Run a tool with bounded auto-retry on recoverable failures. */
+async function runTool(tool: any, args: any): Promise<{ result: any; tries: number }> {
+  let result: any = { ok: false, error: "Tool did not run" };
+  for (let t = 1; t <= TOOL_MAX_TRIES; t++) {
+    try {
+      result = await tool.execute(args);
+    } catch (e: any) {
+      result = { ok: false, error: e?.message || "Failed" };
+    }
+    const failed = result?.ok === false;
+    if (failed && recoverable(String(result.error || "")) && t < TOOL_MAX_TRIES) {
+      await sleepMs(700 * t);
+      continue;
+    }
+    return { result, tries: t };
+  }
+  return { result, tries: TOOL_MAX_TRIES };
+}
+
+/** A concise, human-readable summary of a tool's OUTPUT for the mission timeline. */
+function toolOutcome(name: string, r: any): string {
+  if (!r || r.ok === false) return "";
+  switch (name) {
+    case "web_search": return `${r.count ?? r.results?.length ?? 0} results (${r.provider || "web"})`;
+    case "fetch_url": return `read ${r.text?.length ?? 0} chars from ${r.url || "page"}`;
+    case "read_recent_email": return `${r.count ?? 0} message(s)`;
+    case "list_calendar": return `${r.count ?? 0} event(s) over ${r.days ?? "?"}d`;
+    case "read_note": return r.found ? `read ${r.length ?? 0} chars from “${r.title}”` : "no matching note";
+    case "send_email": return `sent to ${r.emailedTo || ""}`;
+    case "draft_email": return r.deduped ? "draft already existed" : `Gmail draft → ${r.to || ""}`;
+    case "create_calendar_event": return `event created${r.link ? "" : ""}`;
+    case "suggest_calendar_event": return r.deduped ? "already queued" : "queued for approval";
+    case "create_note": return r.updated ? `updated note “${r.updated}”` : `saved note “${r.created}”`;
+    case "create_task": return r.existing ? "task already existed" : `task added`;
+    case "add_contact": return r.updated ? `contact updated` : `contact added`;
+    case "update_deal_stage": return `deal → ${r.stage || ""}`;
+    case "save_memory": return r.existing ? "already remembered" : "remembered";
+    case "search_data": return "searched the brain";
+    case "set_priorities": return `${r.ranked ?? 0} priorities ranked`;
+    case "list_pending_work": return `${r.openTasks ?? 0} tasks · ${r.activeMissions ?? 0} missions`;
+    default: return typeof r.note === "string" ? r.note.slice(0, 80) : "done";
+  }
+}
+
 async function executeCall(id: string, call: any, approved: boolean) {
   const name = call.function?.name as string;
   const args = parseArgs(call);
@@ -248,17 +303,13 @@ async function executeCall(id: string, call: any, approved: boolean) {
     result = { ok: true, skipped: true, note: "Already completed earlier in this mission." };
     await addStep(id, { kind: "action", text: `${tool.summarize(args)} (already done)` });
   } else {
-    try {
-      result = await tool.execute(args);
-      await addStep(id, {
-        kind: "action",
-        text: tool.summarize(args),
-        detail: result?.ok === false ? String(result.error || "Failed") : undefined,
-      });
-    } catch (e: any) {
-      result = { ok: false, error: e?.message || "Failed" };
-      await addStep(id, { kind: "error", text: tool.summarize(args), detail: result.error });
-    }
+    // Run the real tool, auto-retrying transient failures, and LOG its output.
+    const { result: r, tries } = await runTool(tool, args);
+    result = r;
+    const ok = result?.ok !== false;
+    let detail = ok ? toolOutcome(name, result) : String(result.error || "Failed");
+    if (tries > 1) detail = (detail ? detail + " " : "") + `(auto-retried ×${tries - 1})`;
+    await addStep(id, { kind: ok ? "action" : "error", text: tool.summarize(args), detail: detail || undefined });
   }
   await pushApi(id, { role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
 }

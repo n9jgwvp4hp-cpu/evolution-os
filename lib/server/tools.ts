@@ -135,6 +135,15 @@ export const SERVER_TOOLS: ServerTool[] = [
     summarize: (a) => `Search: “${a.query}”`,
     execute: data.searchData,
   },
+  {
+    name: "read_note",
+    description:
+      "READ the full contents of a saved note/document by its title (a file read). Use to retrieve the body " +
+      "of something you or an earlier step saved with create_note, so its content can feed the next step. Read-only.",
+    parameters: obj({ title: str("The note/document title (or part of it)") }, ["title"]),
+    summarize: (a) => `Read document: “${a.title}”`,
+    execute: data.readNote,
+  },
 
   // ---- Outward-facing capabilities: real, completed outcomes ----
   {

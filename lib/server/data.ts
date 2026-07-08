@@ -218,6 +218,19 @@ export async function createNote(a: any) {
   return { ok: true, [updated ? "updated" : "created"]: title };
 }
 
+/** File/document READ: fetch the full contents of a saved note by title (exact
+ *  match preferred, else closest). Pairs with createNote (write) for real
+ *  file operations on persisted documents. */
+export async function readNote(a: any) {
+  const q = String(a.title || "").trim().toLowerCase();
+  return read((db) => {
+    const n = db.notes.find((x) => x.title.toLowerCase() === q) || db.notes.find((x) => x.title.toLowerCase().includes(q));
+    return n
+      ? { ok: true, found: true, title: n.title, body: n.body, length: (n.body || "").length }
+      : { ok: true, found: false, note: `No note matching "${a.title}".`, available: db.notes.slice(0, 10).map((x) => x.title) };
+  });
+}
+
 export async function searchData(a: any) {
   const q = String(a.query || "").toLowerCase();
   const hit = (s: string) => s.toLowerCase().includes(q);
