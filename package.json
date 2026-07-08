@@ -14,7 +14,10 @@
     "verify:engine": "node scripts/verify-engine.mjs",
     "verify:assistant": "node scripts/verify-assistant.mjs",
     "verify:voice": "tsx scripts/verify-voice.ts",
-    "verify:ops": "node scripts/verify-ops.mjs"
+    "verify:ops": "node scripts/verify-ops.mjs",
+    "orchestrate": "node scripts/orchestrator.mjs",
+    "orchestrate:once": "node scripts/orchestrator.mjs --once",
+    "orchestrate:dry": "node scripts/orchestrator.mjs --dry-run"
   },
   "engines": {
     "node": ">=20 <23"

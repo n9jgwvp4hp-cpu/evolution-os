@@ -113,6 +113,39 @@ export default function OpsPage() {
         </div>
       </Card>
 
+      {/* continuous workflow orchestrator */}
+      <Card title="Continuous Workflow Orchestrator" right={
+        ops.orchestrator
+          ? <span className={`rounded-full px-2 py-0.5 text-xs ${ops.orchestrator.running ? "bg-emerald-500/20 text-emerald-300" : ops.orchestrator.phase === "blocked" ? "bg-rose-500/20 text-rose-300" : "bg-white/10 text-slate-300"}`}>{ops.orchestrator.running ? "running" : ops.orchestrator.phase}</span>
+          : <span className="text-xs text-slate-500">not started</span>
+      }>
+        {!ops.orchestrator ? (
+          <p className="text-sm text-slate-500">Start it locally with <code className="rounded bg-white/10 px-1">npm run orchestrate</code> — status appears here live.</p>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between"><span className="text-slate-400">Phase</span><span className="font-medium text-slate-200">{ops.orchestrator.phase}</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Milestone</span><span className="truncate text-slate-200">{ops.orchestrator.currentMilestone || "—"}</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Attempt</span><span>{ops.orchestrator.attempt}/{ops.orchestrator.maxRetries}</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Last run</span><span>{fmtWhen(ops.orchestrator.lastRunAt)}</span></div>
+              <div className="pt-1 text-xs text-slate-400">{ops.orchestrator.message}</div>
+              <div className="mt-2 space-y-0.5">
+                {(ops.orchestrator.milestones || []).slice(0, 8).map((m: any) => (
+                  <div key={m.id} className="flex items-center justify-between text-xs">
+                    <span className="truncate text-slate-300">{m.title}</span>
+                    <span className={`ml-2 shrink-0 ${m.status === "done" ? "text-emerald-300" : m.status === "failed" || m.status === "blocked" ? "text-rose-300" : m.status === "in_progress" ? "text-amber-300" : "text-slate-500"}`}>{m.status}{m.attempts ? ` ·↻${m.attempts}` : ""}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="max-h-52 overflow-auto rounded-lg bg-black/30 p-2 font-mono text-[11px] text-slate-400">
+              {(ops.orchestrator.recent || []).slice(-30).map((r: any, i: number) => <div key={i}><span className="text-slate-600">{fmtClock(r.ts)}</span> {r.text}</div>)}
+              {(!ops.orchestrator.recent || ops.orchestrator.recent.length === 0) && <div className="text-slate-600">no log yet</div>}
+            </div>
+          </div>
+        )}
+      </Card>
+
       <div className="grid gap-5 lg:grid-cols-3">
         {/* kernel */}
         <Card title="Background Kernel">

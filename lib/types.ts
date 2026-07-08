@@ -111,5 +111,23 @@ export type Priority = {
   updatedAt: number;
 };
 
+/**
+ * Live status of the Continuous Workflow Orchestrator, surfaced in the Command
+ * Center. The orchestrator (a local script that drives Claude Code against the
+ * roadmap) POSTs this to /api/orchestrator each phase so the deployed dashboard
+ * can show it regardless of which machine the loop runs on.
+ */
+export type OrchestratorStatus = {
+  running: boolean;
+  phase: string; // idle | implementing | verifying | deploying | health-check | done | blocked | failed
+  currentMilestone: string | null;
+  attempt: number;
+  maxRetries: number;
+  message: string;
+  lastRunAt: number;
+  recent: { ts: number; text: string }[]; // tail of the run log
+  milestones: { id: string; title: string; status: string; attempts: number }[];
+};
+
 /** Collections that live in the shared server brain (files stay client-side). */
 export type BrainKind = "tasks" | "contacts" | "deals" | "notes" | "memories" | "priorities";

@@ -71,6 +71,7 @@ export async function GET() {
       tasks: db.tasks || [],
       contacts: db.contacts || [],
       deals: db.deals || [],
+      orchestrator: db.orchestrator || null,
       googleConnected: !!db.google,
     })),
   ]);
@@ -130,6 +131,7 @@ export async function GET() {
       ai: { status: aiOk ? "ok" : "down", detail: aiOk ? "OpenAI configured" : "no API key" },
     },
     kernel,
+    orchestrator: brain.orchestrator,
     counts,
     missions: { active, queuedNow, scheduled, history, errorsRetries },
     priorities: brain.priorities,

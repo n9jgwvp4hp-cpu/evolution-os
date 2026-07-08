@@ -29,3 +29,6 @@ google-client*.json
 # local one-shot secret hand-off (never commit)
 evo-secret.txt
 **/evo-secret.txt
+
+# orchestrator run logs
+logs/*.log
