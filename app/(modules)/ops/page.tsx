@@ -62,6 +62,11 @@ export default function OpsPage() {
   const [updatedAt, setUpdatedAt] = useState<number>(0);
   const [launching, setLaunching] = useState<string | null>(null);
   const [launchNote, setLaunchNote] = useState<string | null>(null);
+  const [objective, setObjective] = useState("");
+  const [delayMin, setDelayMin] = useState(0);
+  const [everyMin, setEveryMin] = useState(0);
+  const [creating, setCreating] = useState(false);
+  const [createNote, setCreateNote] = useState<string | null>(null);
   const timer = useRef<any>(null);
 
   const load = useCallback(async () => {
@@ -87,6 +92,26 @@ export default function OpsPage() {
     } catch (e: any) { setLaunchNote(e?.message || "Could not start mission."); }
     finally { setLaunching(null); }
   }, [load]);
+
+  // Create a mission from the Command Center — queues it on the same persistent
+  // engine the worker auto-picks up. Optional delay / repeat interval.
+  const createMission = useCallback(async () => {
+    const obj = objective.trim();
+    if (!obj || creating) return;
+    setCreating(true); setCreateNote(null);
+    try {
+      const r = await fetch("/api/missions", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ objective: obj, delayMinutes: Number(delayMin) || 0, everyMinutes: Number(everyMin) || 0 }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Could not queue mission.");
+      setObjective(""); setDelayMin(0); setEveryMin(0);
+      setCreateNote(`Queued — mission ${d.id} will be picked up by the worker.`);
+      load();
+    } catch (e: any) { setCreateNote(e?.message || "Could not queue mission."); }
+    finally { setCreating(false); }
+  }, [objective, delayMin, everyMin, creating, load]);
 
   // Click a mission -> fetch its full step log for the execution timeline.
   const openMission = useCallback(async (id: string) => {
@@ -224,10 +249,26 @@ export default function OpsPage() {
         </Card>
       </div>
 
-      {/* filters + mission list */}
-      <Card title="Missions" right={
+      {/* create + filters + mission list */}
+      <Card title="Mission Queue" right={
         <div className="flex gap-1">{FILTERS.map((f) => <button key={f} onClick={() => setFilter(f)} className={`rounded-md px-2 py-1 text-xs ${filter === f ? "bg-indigo-500 text-white" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}>{f}</button>)}</div>
       }>
+        {/* create a mission */}
+        <div className="mb-3 rounded-xl border border-white/10 bg-white/5 p-3">
+          <textarea
+            value={objective}
+            onChange={(e) => setObjective(e.target.value)}
+            onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") createMission(); }}
+            placeholder="New mission — describe an objective (e.g. “Research the 5 newest condo listings under $600k in Brickell and save a note”). ⌘↵ to queue."
+            className="min-h-[64px] w-full resize-none rounded-lg bg-black/30 p-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+            <label className="flex items-center gap-1">start in <input type="number" min={0} value={delayMin} onChange={(e) => setDelayMin(Math.max(0, Number(e.target.value)))} className="w-14 rounded bg-black/30 px-1 py-0.5 text-slate-100" /> min</label>
+            <label className="flex items-center gap-1">repeat every <input type="number" min={0} value={everyMin} onChange={(e) => setEveryMin(Math.max(0, Number(e.target.value)))} className="w-16 rounded bg-black/30 px-1 py-0.5 text-slate-100" /> min <span className="text-slate-600">(0 = once)</span></label>
+            <button onClick={createMission} disabled={!objective.trim() || creating} className="ml-auto rounded-lg bg-indigo-500 px-3 py-1.5 font-medium text-white hover:bg-indigo-400 disabled:opacity-40">{creating ? "Queuing…" : "Queue mission"}</button>
+          </div>
+          {createNote && <div className="mt-2 text-xs text-emerald-300">{createNote}</div>}
+        </div>
         <div className="space-y-1">
           {list.length === 0 && <div className="py-4 text-center text-sm text-slate-500">No missions match “{filter}”.</div>}
           {list.slice(0, 60).map((m: any) => (
