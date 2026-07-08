@@ -28,8 +28,8 @@
       "verify": [
         "npm run build"
       ],
-      "status": "in_progress",
-      "attempts": 0
+      "status": "done",
+      "attempts": 1
     },
     {
       "id": "mission-quick-actions",
@@ -38,7 +38,7 @@
       "verify": [
         "npm run build"
       ],
-      "status": "pending",
+      "status": "in_progress",
       "attempts": 0
     }
   ]

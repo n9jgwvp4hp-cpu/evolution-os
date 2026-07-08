@@ -31,6 +31,13 @@ function fmtDur(ms?: number | null) {
   if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
+// One-tap mission templates — each starts a real mission via /api/missions.
+const QUICK_ACTIONS: { label: string; objective: string }[] = [
+  { label: "Draft replies to unread leads", objective: "Draft personalized replies to my unread lead emails and leave them awaiting my approval." },
+  { label: "Weekly market update", objective: "Prepare a concise weekly market update summarizing the most important news relevant to my business." },
+  { label: "Prep for tomorrow's meetings", objective: "Review tomorrow's calendar and prepare a briefing for each meeting with context, attendees, and talking points." },
+];
+
 const STATUS_LABEL: Record<string, string> = { queued: "Queued", running: "Running", needs_approval: "Waiting", done: "Completed", failed: "Failed" };
 const STATUS_COLOR: Record<string, string> = { queued: "bg-sky-500/20 text-sky-300", running: "bg-emerald-500/20 text-emerald-300", needs_approval: "bg-amber-500/20 text-amber-300", done: "bg-slate-500/20 text-slate-300", failed: "bg-rose-500/20 text-rose-300" };
 const HEALTH_DOT: Record<string, string> = { ok: "bg-emerald-400", degraded: "bg-amber-400", down: "bg-rose-500" };
@@ -53,6 +60,8 @@ export default function OpsPage() {
   const [filter, setFilter] = useState<Filter>("All");
   const [selected, setSelected] = useState<any | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number>(0);
+  const [launching, setLaunching] = useState<string | null>(null);
+  const [launchNote, setLaunchNote] = useState<string | null>(null);
   const timer = useRef<any>(null);
 
   const load = useCallback(async () => {
@@ -65,6 +74,19 @@ export default function OpsPage() {
   }, []);
 
   useEffect(() => { load(); timer.current = setInterval(load, POLL_MS); return () => clearInterval(timer.current); }, [load]);
+
+  // Start a mission from a one-tap template, then refresh the snapshot.
+  const launchMission = useCallback(async (objective: string, label: string) => {
+    setLaunching(label); setLaunchNote(null);
+    try {
+      const r = await fetch("/api/missions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objective }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Could not start mission.");
+      setLaunchNote(`Started “${label}” — it's running in the background.`);
+      load();
+    } catch (e: any) { setLaunchNote(e?.message || "Could not start mission."); }
+    finally { setLaunching(null); }
+  }, [load]);
 
   // Click a mission -> fetch its full step log for the execution timeline.
   const openMission = useCallback(async (id: string) => {
@@ -97,6 +119,22 @@ export default function OpsPage() {
         </div>
         <span className="flex items-center gap-2 text-xs text-emerald-300"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /> live</span>
       </div>
+
+      {/* quick actions — one-tap mission templates */}
+      <Card title="Quick Actions" right={launchNote && <span className="text-xs text-slate-400">{launchNote}</span>}>
+        <div className="flex flex-wrap gap-2">
+          {QUICK_ACTIONS.map((q) => (
+            <button
+              key={q.label}
+              onClick={() => launchMission(q.objective, q.label)}
+              disabled={launching !== null}
+              className="rounded-lg bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {launching === q.label ? "Starting…" : `⚡ ${q.label}`}
+            </button>
+          ))}
+        </div>
+      </Card>
 
       {/* system health */}
       <Card title="System Health">
