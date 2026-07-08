@@ -100,8 +100,8 @@ export default function OpsPage() {
 
       {/* system health */}
       <Card title="System Health">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-          {["database", "worker", "gmail", "calendar", "crm", "ai"].map((k) => {
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+          {["database", "scheduler", "worker", "gmail", "calendar", "crm", "ai"].map((k) => {
             const h = ops.health[k];
             return (
               <div key={k} className="rounded-xl bg-white/5 p-3">
@@ -154,8 +154,14 @@ export default function OpsPage() {
           {list.slice(0, 60).map((m: any) => (
             <button key={m.id} onClick={() => openMission(m.id)} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-white/5">
               <Badge status={m.status} />
-              <span className="flex-1 truncate text-sm text-slate-200">{m.isKernel ? "🧠 " : ""}{m.objective}</span>
-              <span className="hidden shrink-0 text-xs text-slate-500 sm:block">{m.scheduledFor && m.status === "queued" ? `runs ${fmtWhen(m.scheduledFor)}` : `${fmtDur(m.durationMs)} · ${fmtWhen(m.updatedAt)}`}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm text-slate-200">{m.isKernel ? "🧠 " : ""}{m.objective}</span>
+                {m.status === "running" && m.currentStep && <span className="block truncate text-[11px] text-emerald-300">▶ {m.currentStep}</span>}
+              </span>
+              <span className="hidden shrink-0 text-right text-xs text-slate-500 sm:block">
+                {m.scheduledFor && m.status === "queued" ? `runs ${fmtWhen(m.scheduledFor)}` : `${fmtDur(m.durationMs)} · ${fmtWhen(m.updatedAt)}`}
+                {m.stepCount > 0 && <span className="block text-[10px] text-slate-600">{m.actionCount} actions · {m.stepCount} steps</span>}
+              </span>
               {m.attempts > 0 && <span className="shrink-0 rounded bg-amber-500/20 px-1.5 text-[11px] text-amber-300">↻{m.attempts}</span>}
             </button>
           ))}
@@ -222,19 +228,24 @@ export default function OpsPage() {
               <div><h3 className="font-semibold text-white">Execution Timeline</h3><p className="text-xs text-slate-400">{selected.objective}</p></div>
               <button onClick={() => setSelected(null)} className="text-slate-400 hover:text-white">✕</button>
             </div>
-            {selected.result && <div className="mb-3 rounded-lg bg-white/5 p-2 text-sm text-slate-200"><b>Result:</b> {selected.result}</div>}
+            {selected.result && <div className="mb-3 rounded-lg border border-emerald-400/20 bg-emerald-500/10 p-2 text-sm text-slate-100"><b className="text-emerald-300">Final outcome:</b> {selected.result}</div>}
+            <p className="mb-2 text-[11px] uppercase tracking-widest text-slate-600">Execution timeline — plan · actions · tool calls · results · errors</p>
             <ol className="space-y-2 border-l border-white/10 pl-4">
-              {(selected.steps || []).map((s: any) => (
-                <li key={s.id} className="relative">
-                  <span className="absolute -left-[21px] top-1 h-2 w-2 rounded-full bg-indigo-400" />
-                  <div className="flex items-baseline gap-2">
-                    <span className="shrink-0 text-[11px] text-slate-500">{fmtClock(s.ts)}</span>
-                    <span className="rounded bg-white/10 px-1.5 text-[10px] uppercase text-slate-400">{s.kind}</span>
-                    <span className="text-sm text-slate-200">{s.text}</span>
-                  </div>
-                  {s.detail && <div className="ml-14 text-xs text-slate-500">{s.detail}</div>}
-                </li>
-              ))}
+              {(selected.steps || []).map((s: any) => {
+                const label = ({ plan: "Plan", action: "Tool call", result: "Result", error: "Error", status: "Status", progress: "Progress" } as any)[s.kind] || s.kind;
+                const err = s.kind === "error";
+                return (
+                  <li key={s.id} className="relative">
+                    <span className={`absolute -left-[21px] top-1 h-2 w-2 rounded-full ${err ? "bg-rose-500" : s.kind === "action" ? "bg-sky-400" : s.kind === "result" ? "bg-emerald-400" : "bg-indigo-400"}`} />
+                    <div className="flex items-baseline gap-2">
+                      <span className="shrink-0 text-[11px] text-slate-500">{fmtClock(s.ts)}</span>
+                      <span className={`rounded px-1.5 text-[10px] uppercase ${err ? "bg-rose-500/20 text-rose-300" : "bg-white/10 text-slate-400"}`}>{label}</span>
+                      <span className={`text-sm ${err ? "text-rose-300" : "text-slate-200"}`}>{s.text}</span>
+                    </div>
+                    {s.detail && <div className="ml-14 text-xs text-slate-500">{s.detail}</div>}
+                  </li>
+                );
+              })}
               {(!selected.steps || selected.steps.length === 0) && <li className="text-sm text-slate-500">No steps recorded.</li>}
             </ol>
           </div>

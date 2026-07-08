@@ -55,10 +55,15 @@ const isArr = (x) => Array.isArray(x);
 
   console.log("\n[HEALTH]");
   const H = ops.health || {};
-  const subs = ["database", "worker", "gmail", "calendar", "crm", "ai"];
+  const subs = ["database", "scheduler", "worker", "gmail", "calendar", "crm", "ai"];
   const allHealth = subs.every((s) => H[s] && "status" in H[s]);
-  REQ("Overall system health (database, worker, Gmail, Calendar, CRM, AI provider)",
+  REQ("System health (workers, scheduler, database, AI providers, integrations)",
     allHealth, subs.map((s) => `${s}:${H[s]?.status}`).join(" "));
+
+  const anyMission = [...(ops.missions.history || []), ...(ops.missions.active || [])][0];
+  REQ("Shows progress + current execution step",
+    !!anyMission && "currentStep" in anyMission && "stepCount" in anyMission && "actionCount" in anyMission && /currentStep/.test(page),
+    `missions carry currentStep + step/action counts; running rows show ▶ current step`);
 
   console.log("\n[UI CONTROLS] (static)");
   REQ("Allow filtering by Running, Waiting, Completed, Failed",

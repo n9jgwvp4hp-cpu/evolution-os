@@ -26,10 +26,13 @@ function enrich(m: MissionView, now: number) {
   const endedAt = term?.ts;
   const durationMs = startedAt ? (endedAt || now) - startedAt : ["done", "failed"].includes(m.status) ? m.updatedAt - m.createdAt : null;
   const lastError = [...steps].reverse().find((s) => s.kind === "error")?.text;
+  const last = steps[steps.length - 1];
+  const actionCount = steps.filter((s) => s.kind === "action").length;
   return {
     id: m.id, objective: m.objective, status: m.status,
     createdAt: m.createdAt, updatedAt: m.updatedAt, startedAt, endedAt, durationMs,
-    attempts: m.attempts || 0, stepCount: steps.length,
+    attempts: m.attempts || 0, stepCount: steps.length, actionCount,
+    currentStep: last ? last.text : null, // what the mission is doing right now
     scheduledFor: m.scheduledFor, recurrence: m.recurrence, lastError,
     isKernel: m.objective.startsWith("[KERNEL]"),
   };
@@ -120,6 +123,7 @@ export async function GET() {
     health: {
       database: { status: "ok", detail: dbBackend() },
       worker: { status: workerAlive ? "ok" : "down", detail: workerAlive ? `beating ${Math.round((now - beat!) / 1000)}s ago` : "no heartbeat", lastBeatMsAgo: beat ? now - beat : null },
+      scheduler: { status: workerAlive ? "ok" : "down", detail: kernel.enabled ? `kernel every ${kernel.everyMin}m · ${scheduled.length} scheduled` : `${scheduled.length} scheduled` },
       gmail: { status: googleStatus, detail: googleDetail },
       calendar: { status: googleStatus, detail: googleDetail },
       crm: { status: "ok", detail: `${brain.contacts.length} contacts · ${brain.deals.length} deals` },
