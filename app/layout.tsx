@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import AppShell from "@/components/AppShell";
 import VoiceAssistant from "@/components/VoiceAssistant";
+import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
 
 export const metadata: Metadata = {
   title: "Evolution OS",
@@ -41,11 +42,15 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
           rel="stylesheet"
         />
+        {/* iOS home-screen icon (SVG is supported by modern Safari). */}
+        <link rel="apple-touch-icon" href="/icon.svg" />
       </head>
       <body className="min-h-screen font-sans antialiased">
         <AppShell>{children}</AppShell>
         {/* Persistent voice interface, available on every page (hidden on the root chat, which has its own). */}
         <VoiceAssistant />
+        {/* Installs the app-shell service worker for offline / PWA support. */}
+        <ServiceWorkerRegistrar />
       </body>
     </html>
   );

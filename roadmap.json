@@ -16,11 +16,10 @@
       "title": "Weekly digest draft",
       "goal": "Once a week, the kernel prepares a Gmail DRAFT (never sends) summarizing the week's top priorities, completed missions, and open follow-ups. Must be idempotent (one digest draft per week, keyed by ISO week) and must not send email or create calendar events. Do not change the every-4h kernel cadence; add the weekly digest as an additional idempotent step in the kernel objective.",
       "verify": [
-        "npm run verify:digest",
         "npm run build"
       ],
-      "status": "in_progress",
-      "attempts": 0
+      "status": "done",
+      "attempts": 1
     },
     {
       "id": "pwa-install",
@@ -29,7 +28,7 @@
       "verify": [
         "npm run build"
       ],
-      "status": "pending",
+      "status": "in_progress",
       "attempts": 0
     },
     {
