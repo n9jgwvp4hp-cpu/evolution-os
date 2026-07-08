@@ -5,7 +5,9 @@
       "id": "operations-command-center",
       "title": "Operations Command Center",
       "goal": "Live /ops dashboard of everything the OS is doing, with filters and per-mission execution timelines.",
-      "verify": ["node scripts/verify-ops.mjs"],
+      "verify": [
+        "node scripts/verify-ops.mjs"
+      ],
       "status": "done",
       "attempts": 1
     },
@@ -13,15 +15,20 @@
       "id": "weekly-digest",
       "title": "Weekly digest draft",
       "goal": "Once a week, the kernel prepares a Gmail DRAFT (never sends) summarizing the week's top priorities, completed missions, and open follow-ups. Must be idempotent (one digest draft per week, keyed by ISO week) and must not send email or create calendar events. Do not change the every-4h kernel cadence; add the weekly digest as an additional idempotent step in the kernel objective.",
-      "verify": ["npm run build"],
-      "status": "pending",
+      "verify": [
+        "npm run verify:digest",
+        "npm run build"
+      ],
+      "status": "in_progress",
       "attempts": 0
     },
     {
       "id": "pwa-install",
       "title": "Installable PWA + offline shell",
       "goal": "Make Evolution OS installable on iPhone and Android as a PWA: valid manifest with icons, and a service worker that caches the app shell so it opens offline. Must not break any existing page, the voice interface, or the Command Center.",
-      "verify": ["npm run build"],
+      "verify": [
+        "npm run build"
+      ],
       "status": "pending",
       "attempts": 0
     },
@@ -29,7 +36,9 @@
       "id": "mission-quick-actions",
       "title": "Mission quick-actions",
       "goal": "Add a small row of one-tap mission templates (e.g. 'Draft replies to unread leads', 'Weekly market update', 'Prep for tomorrow's meetings') on the /ops page that each start a mission via the existing /api/missions endpoint. Read-only elsewhere; do not change the mission engine.",
-      "verify": ["npm run build"],
+      "verify": [
+        "npm run build"
+      ],
       "status": "pending",
       "attempts": 0
     }

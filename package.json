@@ -15,6 +15,7 @@
     "verify:assistant": "node scripts/verify-assistant.mjs",
     "verify:voice": "tsx scripts/verify-voice.ts",
     "verify:ops": "node scripts/verify-ops.mjs",
+    "verify:digest": "node scripts/verify-digest.mjs",
     "orchestrate": "node scripts/orchestrator.mjs",
     "orchestrate:once": "node scripts/orchestrator.mjs --once",
     "orchestrate:dry": "node scripts/orchestrator.mjs --dry-run"

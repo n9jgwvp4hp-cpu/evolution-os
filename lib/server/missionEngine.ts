@@ -509,7 +509,11 @@ const KERNEL_OBJECTIVE =
   `  • create_note titled "Summary: <subject/meeting>" for anything worth summarizing.\n` +
   `PHASE 4 — REPORT: update the single note titled "Briefing" (upserts by title) with today's prioritized ` +
   `summary, and in your final message list the TOP priorities (each with its one-line WHY) and the autonomous ` +
-  `actions you prepared. If Google isn't connected, say so plainly and prioritize from the internal brain state.`;
+  `actions you prepared.\n` +
+  `PHASE 5 — WEEKLY DIGEST: call prepare_weekly_digest ONCE to prepare a Gmail DRAFT (never sent) summarizing the ` +
+  `week's top priorities, completed missions, and open follow-ups. It is idempotent per ISO week — safe to call ` +
+  `every run: it creates at most one digest draft per week and never sends mail or creates calendar events.\n` +
+  `If Google isn't connected, say so plainly and prioritize from the internal brain state.`;
 
 /** Ensure exactly one recurring kernel briefing with the CURRENT objective is
  *  live (if enabled). Retires a stale kernel from a previous deploy so objective

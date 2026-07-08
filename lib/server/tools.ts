@@ -29,6 +29,24 @@ const str = (description: string) => ({ type: "string", description });
 const num = (description: string) => ({ type: "number", description });
 const enm = (values: string[], description: string) => ({ type: "string", enum: values, description });
 
+// ISO-8601 week key, e.g. "2026-W28". The weekly digest keys off this so exactly
+// one draft is prepared per calendar week, idempotently across kernel runs.
+function isoWeekKey(d: Date): string {
+  const dt = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const dayNum = dt.getUTCDay() || 7; // Mon=1 … Sun=7
+  dt.setUTCDate(dt.getUTCDate() + 4 - dayNum); // shift to the Thursday of this week
+  const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((dt.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
+  return `${dt.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+// Start (Monday 00:00 UTC) of the ISO week containing d — the window for "this week".
+function isoWeekStart(d: Date): number {
+  const dt = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const dayNum = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() - (dayNum - 1));
+  return dt.getTime();
+}
+
 export const SERVER_TOOLS: ServerTool[] = [
   {
     name: "create_task",
@@ -387,6 +405,111 @@ export const SERVER_TOOLS: ServerTool[] = [
         };
       } catch (e: any) {
         return { ok: false, error: e?.name === "AbortError" ? "Gmail draft timed out." : e?.message || "Draft failed." };
+      }
+    },
+  },
+  {
+    name: "prepare_weekly_digest",
+    description:
+      "Prepare the WEEKLY DIGEST as a real Gmail DRAFT (saved to Drafts, NEVER sent) summarizing the week's top " +
+      "priorities, completed missions, and open follow-ups. Idempotent by ISO week: exactly one digest draft per " +
+      "week — calling it again in the same week won't duplicate it. Creates no calendar events and sends no mail.",
+    parameters: obj(
+      { to: str("Recipient email for the digest. Optional — defaults to the user's own Gmail address (a note-to-self).") },
+      []
+    ),
+    summarize: () => `Prepare weekly digest Gmail draft (${isoWeekKey(new Date())}, not sent)`,
+    async execute(a) {
+      const weekKey = isoWeekKey(new Date());
+      const subject = `Weekly Digest — ${weekKey}`;
+      const { getServerAccessToken } = await import("@/lib/server/google");
+      let token: string;
+      try { token = await getServerAccessToken(); }
+      catch { return { ok: false, error: "Google isn't connected, so I couldn't prepare the digest draft. Connect it in Settings." }; }
+      const auth = { Authorization: `Bearer ${token}` };
+      try {
+        // Idempotency: one digest draft per ISO week. Skip if a draft carrying
+        // this week's subject already exists in Gmail Drafts (the source of truth).
+        const listRes = await fetchWithTimeout("https://gmail.googleapis.com/gmail/v1/users/me/drafts?maxResults=50", { headers: auth });
+        if (listRes.ok) {
+          const drafts = (await listRes.json()).drafts || [];
+          for (const dr of drafts.slice(0, 50)) {
+            const g = await fetchWithTimeout(
+              `https://gmail.googleapis.com/gmail/v1/users/me/drafts/${dr.id}?format=metadata&metadataHeaders=Subject`,
+              { headers: auth }
+            );
+            if (!g.ok) continue;
+            const hdr: Record<string, string> = {};
+            for (const h of (await g.json()).message?.payload?.headers || []) hdr[h.name.toLowerCase()] = h.value;
+            if ((hdr.subject || "").trim().toLowerCase() === subject.toLowerCase()) {
+              return { ok: true, drafted: true, week: weekKey, draftId: dr.id, deduped: true, note: `This week's digest draft (${weekKey}) already exists — not duplicated. Not sent.` };
+            }
+          }
+        }
+
+        // Gather the week's material from the shared brain + the mission log.
+        const { read } = await import("@/lib/server/db");
+        const { listMissionViews } = await import("@/lib/server/missionStore");
+        const weekStart = isoWeekStart(new Date());
+        const { priorities, openTasks } = await read((db) => ({
+          priorities: [...db.priorities].sort((x, y) => y.score - x.score).slice(0, 8),
+          openTasks: db.tasks.filter((t) => !t.done),
+        }));
+        const missions = await listMissionViews();
+        const completed = missions
+          .filter((m) => m.status === "done" && !m.objective.startsWith("[KERNEL]") && (m.updatedAt || 0) >= weekStart)
+          .slice(0, 20);
+        const openMissions = missions
+          .filter((m) => ["queued", "running", "needs_approval"].includes(m.status) && !m.objective.startsWith("[KERNEL]"))
+          .slice(0, 20);
+
+        const line = (s: string) => `  • ${s}`;
+        const followUps = [
+          ...openTasks.map((t: any) => `Task [${t.priority}]: ${t.title}`),
+          ...openMissions.map((m) => `Mission (${m.status}): ${String(m.objective).slice(0, 120)}`),
+        ];
+        const body = [
+          `Weekly digest for ${weekKey}. A note-to-self prepared by Evolution OS — review and send it if you like. Nothing here was sent or scheduled automatically.`,
+          `TOP PRIORITIES (${priorities.length})\n` +
+            (priorities.length ? priorities.map((p) => line(`${p.title} — ${p.why}`)).join("\n") : line("Nothing prioritized this week.")),
+          `COMPLETED MISSIONS THIS WEEK (${completed.length})\n` +
+            (completed.length ? completed.map((m) => line(String(m.objective).slice(0, 140))).join("\n") : line("No missions completed this week.")),
+          `OPEN FOLLOW-UPS (${followUps.length})\n` +
+            (followUps.length ? followUps.slice(0, 30).map(line).join("\n") : line("No open follow-ups.")),
+        ].join("\n\n");
+
+        // The digest is a note-to-self: default the recipient to the user's own address.
+        let to = String(a?.to || "").trim();
+        if (!to) {
+          try {
+            const pRes = await fetchWithTimeout("https://gmail.googleapis.com/gmail/v1/users/me/profile", { headers: auth });
+            if (pRes.ok) to = (await pRes.json()).emailAddress || "";
+          } catch { /* a draft can still be created without a To header */ }
+        }
+
+        const raw =
+          `${to ? `To: ${to}\r\n` : ""}Subject: ${subject}\r\n` +
+          `Content-Type: text/plain; charset=utf-8\r\n\r\n${body}`;
+        const encoded = Buffer.from(raw).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        const res = await fetchWithTimeout("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
+          method: "POST",
+          headers: { ...auth, "Content-Type": "application/json" },
+          body: JSON.stringify({ message: { raw: encoded } }),
+        });
+        if (res.ok) {
+          const d = await res.json();
+          return { ok: true, drafted: true, week: weekKey, draftId: d.id, to, priorities: priorities.length, completed: completed.length, followUps: followUps.length, note: "Created this week's digest as a Gmail draft — review and send it yourself. Not sent." };
+        }
+        const errTxt = (await res.text()).slice(0, 300);
+        const scopeIssue = res.status === 403 || /insufficient|scope|permission|ACCESS_TOKEN_SCOPE/i.test(errTxt);
+        return {
+          ok: false,
+          error: scopeIssue
+            ? "Gmail draft permission not granted. Reconnect Google in Settings — the consent includes the gmail.compose scope needed to create drafts."
+            : `Weekly digest draft failed (${res.status}): ${errTxt}`,
+        };
+      } catch (e: any) {
+        return { ok: false, error: e?.name === "AbortError" ? "Weekly digest timed out." : e?.message || "Digest failed." };
       }
     },
   },
