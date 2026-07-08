@@ -72,6 +72,8 @@ export async function GET() {
       contacts: db.contacts || [],
       deals: db.deals || [],
       orchestrator: db.orchestrator || null,
+      automationRules: db.automationRules || [],
+      eventLog: db.eventLog || [],
       googleConnected: !!db.google,
     })),
   ]);
@@ -132,6 +134,11 @@ export async function GET() {
     },
     kernel,
     orchestrator: brain.orchestrator,
+    automations: {
+      total: brain.automationRules.length,
+      enabled: brain.automationRules.filter((r: any) => r.enabled).length,
+      recentTriggers: brain.eventLog.slice(0, 12),
+    },
     counts,
     missions: { active, queuedNow, scheduled, history, errorsRetries },
     priorities: brain.priorities,

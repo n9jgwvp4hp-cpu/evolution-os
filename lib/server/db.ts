@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { Pool, type PoolClient } from "pg";
-import type { Task, Contact, Deal, Note, Memory, Priority, OrchestratorStatus } from "@/lib/types";
+import type { Task, Contact, Deal, Note, Memory, Priority, OrchestratorStatus, AutomationRule, TriggerEvent } from "@/lib/types";
 
 /**
  * Evolution OS persistence — the server's durable source of truth.
@@ -38,6 +38,8 @@ export type Shape = {
   deals: Deal[];
   priorities: Priority[]; // executive-assistant Priority Queue (rebuilt each kernel cycle)
   orchestrator: OrchestratorStatus | null; // continuous workflow orchestrator status
+  automationRules: AutomationRule[]; // event-driven automation rules
+  eventLog: TriggerEvent[]; // recent trigger fires (bounded)
   google: GoogleTokens | null;
   workerHeartbeat: number | null; // last time the mission worker ticked
 };
@@ -50,6 +52,8 @@ const empty: Shape = {
   deals: [],
   priorities: [],
   orchestrator: null,
+  automationRules: [],
+  eventLog: [],
   google: null,
   workerHeartbeat: null,
 };

@@ -131,5 +131,41 @@ export type OrchestratorStatus = {
   milestones: { id: string; title: string; status: string; attempts: number }[];
 };
 
+/**
+ * An automation rule: the Event Engine watches a supported integration and, when
+ * the rule's condition fires, queues a mission from `objective`. Runtime fields
+ * (`seen`, counts) provide dedup + observability. Missions are safe-only for now
+ * (no autonomous outward actions).
+ */
+export type AutomationRule = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  type: "email" | "calendar" | "schedule" | "webhook";
+  // condition config (per type)
+  from?: string;            // email: sender contains
+  subjectContains?: string; // email: subject contains
+  leadMinutes?: number;     // calendar: fire this many minutes before an event
+  atTime?: string;          // schedule: "HH:MM" (UTC) daily
+  everyMinutes?: number;    // schedule: alternative fixed cadence
+  webhookToken?: string;    // webhook: secret path token
+  objective: string;        // the mission template to queue when it fires
+  // runtime
+  seen: string[];           // dedup keys already triggered (bounded)
+  triggerCount: number;
+  lastTriggeredAt: number | null;
+  createdAt: number;
+};
+
+/** One recorded trigger — every fire is logged here for the Command Center. */
+export type TriggerEvent = {
+  ts: number;
+  ruleId: string;
+  ruleName: string;
+  type: string;
+  event: string;      // human description of what fired it
+  missionId: string;
+};
+
 /** Collections that live in the shared server brain (files stay client-side). */
 export type BrainKind = "tasks" | "contacts" | "deals" | "notes" | "memories" | "priorities";

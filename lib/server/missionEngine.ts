@@ -84,7 +84,7 @@ async function logStatus(id: string, label: string, detail?: string) {
 
 export async function createMission(
   objective: string,
-  opts: { scheduledFor?: number; recurrence?: { everyMs: number } } = {}
+  opts: { scheduledFor?: number; recurrence?: { everyMs: number }; trigger?: { rule: string; event: string } } = {}
 ): Promise<Mission> {
   const scheduled = opts.scheduledFor && opts.scheduledFor > Date.now() ? opts.scheduledFor : undefined;
   const m: Mission = {
@@ -93,6 +93,8 @@ export async function createMission(
     status: "queued",
     steps: [
       { id: uid(), ts: Date.now(), kind: "status", text: "Queued", detail: scheduled ? `scheduled for ${new Date(scheduled).toISOString()}` : undefined },
+      // Record the triggering event so the Mission Queue shows why this ran.
+      ...(opts.trigger ? [{ id: uid(), ts: Date.now(), kind: "plan" as const, text: `⚡ Triggered by rule “${opts.trigger.rule}”`, detail: opts.trigger.event }] : []),
       {
         id: uid(),
         ts: Date.now(),
@@ -612,6 +614,7 @@ export function startWorker() {
 
   let lastBeat = 0;
   let lastPrune = 0;
+  let lastEvents = 0;
   const tick = async () => {
     try {
       // Throttled liveness beat so /api/health can confirm the runtime is alive.
@@ -624,6 +627,12 @@ export function startWorker() {
       if (Date.now() - lastPrune > 5 * 60_000) {
         lastPrune = Date.now();
         await storePrune(MISSION_CAP).catch(() => {});
+      }
+      // Event engine: react to Gmail/Calendar/schedule rules and queue triggered
+      // missions. Throttled so we don't hammer the integrations.
+      if (Date.now() - lastEvents > 90_000) {
+        lastEvents = Date.now();
+        (await import("@/lib/server/eventEngine")).runEventEngine().catch(() => {});
       }
       // Candidates: queued-and-due work, plus missions whose worker died (lapsed
       // lease). We ATOMICALLY claim each before running it, so across any number
