@@ -76,8 +76,9 @@ const milestoneStatuses = (rm) => rm.milestones.map((m) => ({ id: m.id, title: m
 
 async function postStatus(rm, partial) {
   const body = {
-    running: true, phase: "idle", currentMilestone: null, attempt: 0, maxRetries: MAX_RETRIES,
-    message: "", lastRunAt: Date.now(), recent: nowLog.slice(-40), milestones: milestoneStatuses(rm), ...partial,
+    running: true, mode: process.env.ORCH_MODE || "manual", phase: "idle", currentMilestone: null,
+    attempt: 0, maxRetries: MAX_RETRIES, message: "", lastRunAt: Date.now(), nextRunAt: null,
+    recent: nowLog.slice(-40), milestones: milestoneStatuses(rm), ...partial,
   };
   try { await fetch(`${BASE}/api/orchestrator`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); } catch {}
 }

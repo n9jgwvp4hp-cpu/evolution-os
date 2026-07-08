@@ -38,8 +38,8 @@
       "verify": [
         "npm run build"
       ],
-      "status": "in_progress",
-      "attempts": 0
+      "status": "done",
+      "attempts": 1
     }
   ]
 }

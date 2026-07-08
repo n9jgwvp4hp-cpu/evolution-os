@@ -32,3 +32,4 @@ evo-secret.txt
 
 # orchestrator run logs
 logs/*.log
+logs/daemon.pid

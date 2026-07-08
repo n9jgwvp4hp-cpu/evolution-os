@@ -18,7 +18,11 @@
     "verify:digest": "node scripts/verify-digest.mjs",
     "orchestrate": "node scripts/orchestrator.mjs",
     "orchestrate:once": "node scripts/orchestrator.mjs --once",
-    "orchestrate:dry": "node scripts/orchestrator.mjs --dry-run"
+    "orchestrate:dry": "node scripts/orchestrator.mjs --dry-run",
+    "orchestrate:start": "bash scripts/orchestratord.sh start",
+    "orchestrate:stop": "bash scripts/orchestratord.sh stop",
+    "orchestrate:status": "bash scripts/orchestratord.sh status",
+    "orchestrate:logs": "bash scripts/orchestratord.sh logs"
   },
   "engines": {
     "node": ">=20 <23"

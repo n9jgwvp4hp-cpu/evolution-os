@@ -119,12 +119,14 @@ export type Priority = {
  */
 export type OrchestratorStatus = {
   running: boolean;
-  phase: string; // idle | implementing | verifying | deploying | health-check | done | blocked | failed
+  mode: string; // "manual" | "daemon" — whether the persistent runner is driving
+  phase: string; // idle | implementing | verifying | deploying | health-check | done | blocked | failed | stopped
   currentMilestone: string | null;
   attempt: number;
   maxRetries: number;
   message: string;
   lastRunAt: number;
+  nextRunAt: number | null; // when the persistent runner will next check/run (epoch ms)
   recent: { ts: number; text: string }[]; // tail of the run log
   milestones: { id: string; title: string; status: string; attempts: number }[];
 };
