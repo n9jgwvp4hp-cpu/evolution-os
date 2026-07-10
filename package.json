@@ -27,7 +27,8 @@
     "verify:tools": "node scripts/verify-tools.mjs",
     "verify:events": "node scripts/verify-events.mjs",
     "verify:hierarchy": "node scripts/verify-hierarchy.mjs",
-    "verify:reasoning": "node scripts/verify-objective-reasoning.mjs"
+    "verify:reasoning": "node scripts/verify-objective-reasoning.mjs",
+    "verify:multibrand": "node scripts/verify-multibrand.mjs"
   },
   "engines": {
     "node": ">=20 <23"

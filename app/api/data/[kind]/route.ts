@@ -4,12 +4,17 @@ import { listKind, replaceKind, isBrainKind } from "@/lib/server/data";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** GET /api/data/[kind] — read a whole collection from the shared brain. */
-export async function GET(_req: NextRequest, { params }: { params: { kind: string } }) {
+/** GET /api/data/[kind] — read a whole collection from the shared brain.
+ *  Optional ?brandId=… scopes brand-aware collections (contacts/deals/projects);
+ *  omitting it returns everything (back-compat with the global module views). */
+export async function GET(req: NextRequest, { params }: { params: { kind: string } }) {
   if (!isBrainKind(params.kind)) {
     return NextResponse.json({ error: "Unknown collection." }, { status: 404 });
   }
-  return NextResponse.json({ items: await listKind(params.kind) });
+  let items = await listKind(params.kind);
+  const brandId = req.nextUrl.searchParams.get("brandId");
+  if (brandId) items = (items as any[]).filter((it) => it && it.brandId === brandId);
+  return NextResponse.json({ items });
 }
 
 /** PUT /api/data/[kind] — replace a whole collection (module views save here). */

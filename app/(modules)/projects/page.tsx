@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import PageHeader from "@/components/PageHeader";
-import { useLocalStorage, uid, formatDate, type Project } from "@/lib/store";
+import { uid, formatDate, type Project } from "@/lib/store";
+import { useCollection } from "@/lib/collection";
+import { useBrand } from "@/components/BrandContext";
 
 const STATUS: Record<Project["status"], string> = {
   planning: "bg-amber-500/15 text-amber-300 border-amber-500/30",
@@ -11,21 +13,30 @@ const STATUS: Record<Project["status"], string> = {
 };
 
 export default function ProjectsPage() {
-  const [projects, setProjects, loaded] = useLocalStorage<Project[]>("evo.projects", []);
+  const [allProjects, setProjects, loaded] = useCollection<Project>("projects", []);
+  const { activeBrand, isParentActive } = useBrand();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+
+  // The parent (UW Equity) sees every project; a subsidiary sees only its own.
+  const projects = useMemo(
+    () => (isParentActive || !activeBrand ? allProjects : allProjects.filter((p) => p.brandId === activeBrand.id)),
+    [allProjects, activeBrand, isParentActive]
+  );
 
   function add(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
     const project: Project = {
       id: uid(),
+      // New projects belong to the active brand (unless the portfolio parent is active).
+      brandId: isParentActive ? null : activeBrand?.id ?? null,
       name: name.trim(),
       description: description.trim(),
       status: "planning",
       createdAt: Date.now(),
     };
-    setProjects([project, ...projects]);
+    setProjects([project, ...allProjects]);
     setName("");
     setDescription("");
   }
@@ -33,7 +44,7 @@ export default function ProjectsPage() {
   function cycleStatus(id: string) {
     const order: Project["status"][] = ["planning", "active", "done"];
     setProjects(
-      projects.map((p) =>
+      allProjects.map((p) =>
         p.id === id
           ? { ...p, status: order[(order.indexOf(p.status) + 1) % order.length] }
           : p
@@ -42,7 +53,7 @@ export default function ProjectsPage() {
   }
 
   function remove(id: string) {
-    setProjects(projects.filter((p) => p.id !== id));
+    setProjects(allProjects.filter((p) => p.id !== id));
   }
 
   return (

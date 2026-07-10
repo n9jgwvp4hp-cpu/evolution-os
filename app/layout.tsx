@@ -3,6 +3,7 @@ import "./globals.css";
 import AppShell from "@/components/AppShell";
 import VoiceAssistant from "@/components/VoiceAssistant";
 import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
+import { BrandProvider } from "@/components/BrandContext";
 
 export const metadata: Metadata = {
   title: "Evolution OS",
@@ -46,9 +47,11 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/icon.svg" />
       </head>
       <body className="min-h-screen font-sans antialiased">
-        <AppShell>{children}</AppShell>
-        {/* Persistent voice interface, available on every page (hidden on the root chat, which has its own). */}
-        <VoiceAssistant />
+        <BrandProvider>
+          <AppShell>{children}</AppShell>
+          {/* Persistent voice interface, available on every page (hidden on the root chat, which has its own). */}
+          <VoiceAssistant />
+        </BrandProvider>
         {/* Installs the app-shell service worker for offline / PWA support. */}
         <ServiceWorkerRegistrar />
       </body>

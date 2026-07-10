@@ -10,6 +10,7 @@ import {
   type Contact,
 } from "@/lib/store";
 import { useCollection } from "@/lib/collection";
+import { useBrand } from "@/components/BrandContext";
 
 const STAGES: { key: DealStage; label: string; color: string }[] = [
   { key: "lead", label: "Lead", color: "border-sky-500/40" },
@@ -37,24 +38,32 @@ const blank = (): Deal => ({
 export default function PipelinePage() {
   const [deals, setDeals, loaded] = useCollection<Deal>("deals", []);
   const [contacts] = useCollection<Contact>("contacts", []);
+  const { activeBrand, isParentActive } = useBrand();
   const [draft, setDraft] = useState<Deal>(blank());
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Separate deal pipelines by brand: parent sees all, subsidiary sees its own.
+  const scoped = useMemo(
+    () => (isParentActive || !activeBrand ? deals : deals.filter((d) => d.brandId === activeBrand.id)),
+    [deals, activeBrand, isParentActive]
+  );
+
   const stats = useMemo(() => {
-    const active = deals.filter((d) => !["closed", "lost"].includes(d.stage));
+    const active = scoped.filter((d) => !["closed", "lost"].includes(d.stage));
     const pipelineValue = active.reduce((s, d) => s + (d.price || 0), 0);
     const expectedCommission = active.reduce((s, d) => s + (d.commission || 0), 0);
-    const closedValue = deals
+    const closedValue = scoped
       .filter((d) => d.stage === "closed")
       .reduce((s, d) => s + (d.commission || 0), 0);
     return { active: active.length, pipelineValue, expectedCommission, closedValue };
-  }, [deals]);
+  }, [scoped]);
 
   function save() {
     if (!draft.address.trim()) return;
     const exists = deals.some((d) => d.id === draft.id);
     const next = { ...draft, updatedAt: Date.now() };
+    if (!exists) next.brandId = isParentActive ? draft.brandId ?? null : activeBrand?.id ?? null;
     setDeals(exists ? deals.map((d) => (d.id === draft.id ? next : d)) : [next, ...deals]);
     setDraft(blank());
     setShowForm(false);
@@ -136,7 +145,7 @@ export default function PipelinePage() {
       {/* Kanban */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
         {STAGES.map((stage) => {
-          const items = deals.filter((d) => d.stage === stage.key);
+          const items = scoped.filter((d) => d.stage === stage.key);
           return (
             <div key={stage.key} className={`glass p-3 border-t-2 ${stage.color}`}>
               <div className="flex items-center justify-between mb-3">

@@ -5,9 +5,85 @@
 
 export type Project = {
   id: string;
+  brandId?: string | null; // which brand this project belongs to (multi-brand scoping)
   name: string;
   description: string;
   status: "planning" | "active" | "done";
+  createdAt: number;
+};
+
+/* =========================================================================
+ * Multi-brand architecture. UW Equity is the parent (holding) company;
+ * Prism44, Quality Management, and future companies are its subsidiaries.
+ * Brand is a cross-cutting dimension: contacts, deals, projects, objectives,
+ * onboarding forms, and lead sources all scope to a brand, and the parent
+ * dashboard rolls everything up across the portfolio.
+ * ========================================================================= */
+
+/** How a lead found a brand. Configurable per brand; these are the defaults. */
+export type LeadSource = "website" | "instagram" | "referral" | "ads" | "direct" | "other";
+export const LEAD_SOURCES: LeadSource[] = ["website", "instagram", "referral", "ads", "direct", "other"];
+
+export type BrandColors = {
+  primary: string;    // brand primary (hex)
+  secondary?: string;
+  accent?: string;
+};
+
+export type Brand = {
+  id: string;
+  name: string;                 // "UW Equity", "Prism44", "Quality Management"
+  slug: string;                 // "uw-equity", "prism44"
+  parentId: string | null;      // subsidiaries point to the parent; the parent's is null
+  isParent: boolean;            // true only for UW Equity (the holding company)
+  domain?: string;
+  logo?: string;                // URL or short initials/emoji (no asset pipeline yet)
+  instagramAccounts: string[];
+  emailAccounts: string[];
+  services: string[];
+  colors: BrandColors;
+  leadSources: LeadSource[];    // which sources are enabled for this brand
+  status: "active" | "paused" | "archived";
+  createdAt: number;
+  updatedAt: number;
+};
+
+/** App-wide UI/runtime settings (single-user OS). */
+export type AppSettings = {
+  activeBrandId: string | null; // the brand currently in focus (drives the switcher + scoped views)
+};
+
+export type OnboardingFieldType = "text" | "email" | "phone" | "textarea" | "select" | "number";
+
+/** One field in a brand's onboarding form. `mapsTo` links the answer to a Contact
+ *  field so a submission becomes a real CRM lead automatically. */
+export type OnboardingField = {
+  id: string;
+  label: string;
+  type: OnboardingFieldType;
+  required: boolean;
+  options?: string[]; // for type "select"
+  mapsTo?: "name" | "email" | "phone" | "budget" | "notes" | "type";
+};
+
+export type OnboardingForm = {
+  id: string;
+  brandId: string;
+  title: string;
+  description?: string;
+  fields: OnboardingField[];
+  status: "active" | "disabled";
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type FormSubmission = {
+  id: string;
+  formId: string;
+  brandId: string;
+  data: Record<string, any>;
+  leadSource: LeadSource;
+  contactId: string | null; // the CRM lead this submission created
   createdAt: number;
 };
 
@@ -47,12 +123,14 @@ export type LeadStatus =
 
 export type Contact = {
   id: string;
+  brandId?: string | null; // which brand's pipeline this lead belongs to
   name: string;
   email: string;
   phone: string;
   type: "buyer" | "seller" | "investor" | "renter" | "other";
   status: LeadStatus;
-  source: string;
+  source: string; // free-form origin note (kept for back-compat)
+  leadSource?: LeadSource; // structured lead-source attribution (website/instagram/referral/ads/…)
   budget: number; // 0 = unknown
   notes: string;
   lastTouch: number;
@@ -69,6 +147,7 @@ export type DealStage =
 
 export type Deal = {
   id: string;
+  brandId?: string | null; // which brand's pipeline this deal belongs to
   address: string;
   price: number;
   side: "buy" | "sell";
@@ -120,6 +199,7 @@ export type Vision = {
  *  up to an Objective; the OS maintains its evolving `state` + `progress`. */
 export type Objective = {
   id: string;
+  brandId?: string | null; // which brand this objective advances (portfolio scoping)
   visionId: string | null; // the Vision it supports (traceability up)
   title: string;           // "Grow Prism44 to $50k MRR"
   description: string;
@@ -215,4 +295,4 @@ export type TriggerEvent = {
 };
 
 /** Collections that live in the shared server brain (files stay client-side). */
-export type BrainKind = "tasks" | "contacts" | "deals" | "notes" | "memories" | "priorities";
+export type BrainKind = "tasks" | "projects" | "contacts" | "deals" | "notes" | "memories" | "priorities";

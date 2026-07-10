@@ -9,7 +9,7 @@ import type { Task, Contact, Deal, Note, Memory, Priority, LeadStatus, DealStage
  * through /api/data. There is exactly one persistent brain.
  */
 
-const KINDS: BrainKind[] = ["tasks", "contacts", "deals", "notes", "memories", "priorities"];
+const KINDS: BrainKind[] = ["tasks", "projects", "contacts", "deals", "notes", "memories", "priorities"];
 export function isBrainKind(k: string): k is BrainKind {
   return (KINDS as string[]).includes(k);
 }
@@ -166,16 +166,19 @@ export async function addContact(a: any) {
       if (a.type) ex.type = a.type as Contact["type"];
       if (a.status) ex.status = a.status as LeadStatus;
       if (a.source) ex.source = a.source;
+      if (a.leadSource) ex.leadSource = a.leadSource as Contact["leadSource"];
+      if (a.brandId !== undefined) ex.brandId = a.brandId;
       if (a.budget != null && Number(a.budget)) ex.budget = Number(a.budget);
       if (a.notes) ex.notes = a.notes;
       ex.lastTouch = Date.now();
       updated = true;
     } else {
       db.contacts.unshift({
-        id: uid(), name, email: a.email || "", phone: a.phone || "",
+        id: uid(), brandId: a.brandId ?? null, name, email: a.email || "", phone: a.phone || "",
         type: (a.type as Contact["type"]) || "other",
         status: (a.status as LeadStatus) || "new",
-        source: a.source || "", budget: Number(a.budget) || 0, notes: a.notes || "",
+        source: a.source || "", leadSource: a.leadSource as Contact["leadSource"],
+        budget: Number(a.budget) || 0, notes: a.notes || "",
         lastTouch: Date.now(), createdAt: Date.now(),
       });
     }
@@ -187,6 +190,7 @@ export async function createDeal(a: any) {
   let linkedName: string | null = null;
   const deal: Deal = {
     id: uid(),
+    brandId: a.brandId ?? null,
     address: String(a.address),
     price: Number(a.price) || 0,
     side: (a.side as Deal["side"]) || "buy",

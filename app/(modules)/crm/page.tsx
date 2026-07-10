@@ -10,6 +10,7 @@ import {
   type LeadStatus,
 } from "@/lib/store";
 import { useCollection } from "@/lib/collection";
+import { useBrand } from "@/components/BrandContext";
 
 const STATUSES: LeadStatus[] = [
   "new",
@@ -47,15 +48,23 @@ const blank = (): Contact => ({
 
 export default function CrmPage() {
   const [contacts, setContacts, loaded] = useCollection<Contact>("contacts", []);
+  const { activeBrand, isParentActive } = useBrand();
   const [draft, setDraft] = useState<Contact>(blank());
   const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">("all");
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Separate CRM pipelines by brand: the parent (UW Equity) sees every lead; a
+  // subsidiary sees only its own. Mutations still run against the full list.
+  const scoped = useMemo(
+    () => (isParentActive || !activeBrand ? contacts : contacts.filter((c) => c.brandId === activeBrand.id)),
+    [contacts, activeBrand, isParentActive]
+  );
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return contacts
+    return scoped
       .filter((c) => (statusFilter === "all" ? true : c.status === statusFilter))
       .filter((c) =>
         q
@@ -65,7 +74,7 @@ export default function CrmPage() {
               .includes(q)
           : true
       );
-  }, [contacts, query, statusFilter]);
+  }, [scoped, query, statusFilter]);
 
   function save() {
     if (!draft.name.trim()) return;
@@ -73,7 +82,9 @@ export default function CrmPage() {
     if (exists) {
       setContacts(contacts.map((c) => (c.id === draft.id ? draft : c)));
     } else {
-      setContacts([draft, ...contacts]);
+      // New leads join the active brand's pipeline (unassigned when the parent is active).
+      const withBrand = { ...draft, brandId: isParentActive ? draft.brandId ?? null : activeBrand?.id ?? null };
+      setContacts([withBrand, ...contacts]);
     }
     setDraft(blank());
     setShowForm(false);
@@ -92,14 +103,14 @@ export default function CrmPage() {
     setEditingId(c.id);
   }
 
-  const counts = STATUSES.map((s) => contacts.filter((c) => c.status === s).length);
+  const counts = STATUSES.map((s) => scoped.filter((c) => c.status === s).length);
 
   return (
     <div className="max-w-6xl mx-auto">
       <PageHeader
         title="CRM · Leads"
-        subtitle={`${contacts.length} contacts · ${
-          contacts.filter((c) => !["closed", "lost"].includes(c.status)).length
+        subtitle={`${activeBrand && !isParentActive ? activeBrand.name + " · " : ""}${scoped.length} contacts · ${
+          scoped.filter((c) => !["closed", "lost"].includes(c.status)).length
         } active`}
         action={
           <button

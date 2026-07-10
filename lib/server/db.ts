@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { Pool, type PoolClient } from "pg";
-import type { Task, Contact, Deal, Note, Memory, Priority, OrchestratorStatus, AutomationRule, TriggerEvent, Identity, Vision, Objective } from "@/lib/types";
+import type { Task, Contact, Deal, Note, Memory, Priority, OrchestratorStatus, AutomationRule, TriggerEvent, Identity, Vision, Objective, Brand, AppSettings, OnboardingForm, FormSubmission, Project } from "@/lib/types";
 
 /**
  * Evolution OS persistence — the server's durable source of truth.
@@ -31,12 +31,17 @@ export type GoogleTokens = {
 // brain collections; they don't churn per mission step, so a single-row JSONB is
 // still the right fit for them.
 export type Shape = {
+  brands: Brand[];           // multi-brand portfolio (UW Equity parent + subsidiaries)
+  settings: AppSettings | null; // app-wide UI settings (active brand, …)
+  onboardingForms: OnboardingForm[]; // brand-specific onboarding forms
+  formSubmissions: FormSubmission[]; // onboarding submissions (bounded) → become leads
   identity: Identity | null; // who the user is + what they value (singleton)
   visions: Vision[];         // long-term futures being built
   objectives: Objective[];   // measurable outcomes supporting the visions
   memories: Memory[];
   notes: Note[];
   tasks: Task[];
+  projects: Project[]; // brand-scopable initiatives (server-backed; feeds the portfolio dashboard)
   contacts: Contact[];
   deals: Deal[];
   priorities: Priority[]; // executive-assistant Priority Queue (rebuilt each kernel cycle)
@@ -48,12 +53,17 @@ export type Shape = {
 };
 
 const empty: Shape = {
+  brands: [],
+  settings: null,
+  onboardingForms: [],
+  formSubmissions: [],
   identity: null,
   visions: [],
   objectives: [],
   memories: [],
   notes: [],
   tasks: [],
+  projects: [],
   contacts: [],
   deals: [],
   priorities: [],
