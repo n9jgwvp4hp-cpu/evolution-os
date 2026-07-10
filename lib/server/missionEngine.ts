@@ -539,12 +539,15 @@ export async function pauseMission(id: string, reason?: string): Promise<boolean
   return true;
 }
 
-/** Resume a paused mission back into the queue (optionally due at a later time). */
+/** Resume a paused mission back into the queue. Preserves the mission's existing
+ *  schedule (so a deferred mission doesn't jump to run immediately); pass an
+ *  explicit scheduledFor only to override it. */
 export async function resumeMission(id: string, scheduledFor?: number): Promise<boolean> {
   const m = await getMission(id);
   if (!m || m.status !== "paused") return false;
-  const sched = scheduledFor && scheduledFor > Date.now() ? scheduledFor : undefined;
-  await patch(id, { status: "queued", scheduledFor: sched });
+  const p: Partial<Mission> = { status: "queued" };
+  if (scheduledFor !== undefined) p.scheduledFor = scheduledFor > Date.now() ? scheduledFor : undefined;
+  await patch(id, p);
   await logStatus(id, "Queued", "resumed by Objective Planner");
   return true;
 }
