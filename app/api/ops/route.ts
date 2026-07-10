@@ -29,7 +29,7 @@ function enrich(m: MissionView, now: number) {
   const last = steps[steps.length - 1];
   const actionCount = steps.filter((s) => s.kind === "action").length;
   return {
-    id: m.id, objective: m.objective, objectiveId: m.objectiveId ?? null, status: m.status,
+    id: m.id, objective: m.objective, objectiveId: m.objectiveId ?? null, priority: m.priority ?? 0, status: m.status,
     createdAt: m.createdAt, updatedAt: m.updatedAt, startedAt, endedAt, durationMs,
     attempts: m.attempts || 0, stepCount: steps.length, actionCount,
     currentStep: last ? last.text : null, // what the mission is doing right now
@@ -129,9 +129,14 @@ export async function GET() {
     if (!m.objectiveId) continue;
     (missionsByObjective.get(m.objectiveId) || missionsByObjective.set(m.objectiveId, []).get(m.objectiveId)!).push(m);
   }
+  const OPEN_STATUSES = ["queued", "running", "needs_approval", "paused"];
   const objectives = brain.objectives.map((o: any) => {
     const ms = missionsByObjective.get(o.id) || [];
     const vision = o.visionId ? visionById.get(o.visionId) || null : null;
+    // The single highest-value next mission = the highest-priority OPEN mission
+    // (what the Objective Planner has decided the OS should do next for this objective).
+    const openMs = ms.filter((m) => OPEN_STATUSES.includes(m.status)).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+    const hv = openMs[0] || null;
     return {
       ...o,
       vision: vision ? { id: vision.id, title: vision.title, status: vision.status } : null,
@@ -139,9 +144,11 @@ export async function GET() {
         total: ms.length,
         active: ms.filter((m) => ["running", "needs_approval"].includes(m.status)).length,
         queued: ms.filter((m) => m.status === "queued").length,
+        paused: ms.filter((m) => m.status === "paused").length,
         done: ms.filter((m) => m.status === "done").length,
         failed: ms.filter((m) => m.status === "failed").length,
       },
+      highestValueMission: hv ? { id: hv.id, objective: hv.objective, status: hv.status, priority: hv.priority ?? 0 } : null,
       missionIds: ms.map((m) => m.id),
     };
   });

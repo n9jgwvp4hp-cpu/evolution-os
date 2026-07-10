@@ -11,6 +11,7 @@ export type MissionStatus =
   | "queued" // accepted, waiting for the worker
   | "running" // actively executing on the server
   | "needs_approval" // paused for a user decision
+  | "paused" // deprioritized by the Objective Planner — not runnable until resumed
   | "done"
   | "failed";
 
@@ -21,6 +22,7 @@ export const STATUS_LABEL = {
   queued: "Queued",
   running: "Running",
   needs_approval: "Waiting",
+  paused: "Paused",
   done: "Completed",
   failed: "Failed",
 } as const;
@@ -48,6 +50,7 @@ export type Mission = {
   id: string;
   objective: string;
   objectiveId?: string | null; // the Objective this mission ladders up to (traceability)
+  priority?: number; // planner rank; higher = claimed sooner among due queued missions (default 0)
   status: MissionStatus;
   steps: MissionStep[];
   api: MissionApiMsg[]; // running model conversation — enables resume after restart

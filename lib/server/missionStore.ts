@@ -50,6 +50,7 @@ function initPg(): Promise<void> {
           worker_id TEXT,
           lease_expires BIGINT,
           objective_id TEXT,
+          priority INT NOT NULL DEFAULT 0,
           created_at BIGINT NOT NULL,
           updated_at BIGINT NOT NULL
         )`);
@@ -57,6 +58,7 @@ function initPg(): Promise<void> {
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS worker_id TEXT`);
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS lease_expires BIGINT`);
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS objective_id TEXT`);
+      await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_status_sched ON missions (status, scheduled_for)`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_created ON missions (created_at DESC)`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_lease ON missions (status, lease_expires)`);
@@ -120,15 +122,15 @@ async function insertMissionTx(client: PoolClient, m: Mission): Promise<void> {
   await client.query(
     `INSERT INTO missions
        (id, objective, status, result, qc_left, attempts, acknowledged, pending,
-        pending_decision, scheduled_for, recurrence_every_ms, objective_id, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        pending_decision, scheduled_for, recurrence_every_ms, objective_id, priority, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
      ON CONFLICT (id) DO NOTHING`,
     [
       m.id, m.objective, m.status, m.result ?? null, m.qcLeft ?? 2, m.attempts ?? 0,
       Boolean(m.acknowledged), JSON.stringify(m.pending ?? []),
       m.pendingDecision === undefined ? null : m.pendingDecision,
       m.scheduledFor ?? null, m.recurrence?.everyMs ?? null, m.objectiveId ?? null,
-      m.createdAt, m.updatedAt,
+      m.priority ?? 0, m.createdAt, m.updatedAt,
     ]
   );
   for (const s of m.steps ?? []) {
@@ -160,6 +162,7 @@ function rowToMission(r: any, steps: MissionStep[], api: MissionApiMsg[]): Missi
     scheduledFor: r.scheduled_for != null ? Number(r.scheduled_for) : undefined,
     recurrence: r.recurrence_every_ms != null ? { everyMs: Number(r.recurrence_every_ms) } : undefined,
     objectiveId: r.objective_id ?? null,
+    priority: r.priority != null ? Number(r.priority) : 0,
     workerId: r.worker_id ?? undefined,
     leaseExpires: r.lease_expires != null ? Number(r.lease_expires) : undefined,
     createdAt: Number(r.created_at),
@@ -184,6 +187,7 @@ const PATCH_COLS: Record<string, { col: string; val: (v: any) => any }> = {
   scheduledFor: { col: "scheduled_for", val: (v) => v ?? null },
   recurrence: { col: "recurrence_every_ms", val: (v) => v?.everyMs ?? null },
   objectiveId: { col: "objective_id", val: (v) => v ?? null },
+  priority: { col: "priority", val: (v) => Math.round(Number(v) || 0) },
 };
 
 /* ============================== File ============================== */
@@ -323,7 +327,8 @@ export async function listRunnable(now: number): Promise<Array<{ id: string; sta
     const { rows } = await getPool().query(
       `SELECT id, status FROM missions
         WHERE (status = 'queued'  AND (scheduled_for IS NULL OR scheduled_for <= $1))
-           OR (status = 'running' AND (lease_expires IS NULL OR lease_expires <= $1))`,
+           OR (status = 'running' AND (lease_expires IS NULL OR lease_expires <= $1))
+        ORDER BY priority DESC, created_at ASC`,
       [now]
     );
     return rows;
@@ -335,6 +340,7 @@ export async function listRunnable(now: number): Promise<Array<{ id: string; sta
           (m.status === "queued" && (!m.scheduledFor || m.scheduledFor <= now)) ||
           (m.status === "running" && (!m.leaseExpires || m.leaseExpires <= now))
       )
+      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0) || a.createdAt - b.createdAt)
       .map((m) => ({ id: m.id, status: m.status }))
   );
 }

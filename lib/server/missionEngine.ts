@@ -84,13 +84,14 @@ async function logStatus(id: string, label: string, detail?: string) {
 
 export async function createMission(
   objective: string,
-  opts: { scheduledFor?: number; recurrence?: { everyMs: number }; trigger?: { rule: string; event: string }; objectiveId?: string | null } = {}
+  opts: { scheduledFor?: number; recurrence?: { everyMs: number }; trigger?: { rule: string; event: string }; objectiveId?: string | null; priority?: number } = {}
 ): Promise<Mission> {
   const scheduled = opts.scheduledFor && opts.scheduledFor > Date.now() ? opts.scheduledFor : undefined;
   const m: Mission = {
     id: uid(),
     objective,
     objectiveId: opts.objectiveId ?? null,
+    priority: Math.round(Number(opts.priority) || 0),
     status: "queued",
     steps: [
       { id: uid(), ts: Date.now(), kind: "status", text: "Queued", detail: scheduled ? `scheduled for ${new Date(scheduled).toISOString()}` : undefined },
@@ -521,6 +522,44 @@ export async function cancelMission(id: string) {
   await cancelMissionRow(id);
 }
 
+/* ---- Objective-Planner lifecycle controls ----
+ * The planner reconciles existing work with fresh reasoning each cycle: it can
+ * PAUSE a mission that no longer serves its objective, RESUME one that regained
+ * value, and REPRIORITIZE so the highest-value mission for each objective runs
+ * first. A paused mission is non-runnable (listRunnable selects only queued/
+ * running) until resumed — no lease is held, so it never blocks a worker. */
+
+/** Pause a not-yet-started mission (queued or awaiting approval). Running/terminal
+ *  missions are left alone — we never yank work out from under a live worker. */
+export async function pauseMission(id: string, reason?: string): Promise<boolean> {
+  const m = await getMission(id);
+  if (!m || !["queued", "needs_approval"].includes(m.status)) return false;
+  await patch(id, { status: "paused" });
+  await logStatus(id, "Paused", reason || "deprioritized by Objective Planner");
+  return true;
+}
+
+/** Resume a paused mission back into the queue (optionally due at a later time). */
+export async function resumeMission(id: string, scheduledFor?: number): Promise<boolean> {
+  const m = await getMission(id);
+  if (!m || m.status !== "paused") return false;
+  const sched = scheduledFor && scheduledFor > Date.now() ? scheduledFor : undefined;
+  await patch(id, { status: "queued", scheduledFor: sched });
+  await logStatus(id, "Queued", "resumed by Objective Planner");
+  return true;
+}
+
+/** Set a mission's claim priority (higher = claimed sooner among due work). */
+export async function reprioritizeMission(id: string, priority: number, reason?: string): Promise<boolean> {
+  const m = await getMission(id);
+  if (!m || ["done", "failed"].includes(m.status)) return false;
+  const p = Math.round(Number(priority) || 0);
+  if ((m.priority ?? 0) === p) return true;
+  await patch(id, { priority: p });
+  await logT(id, `reprioritized → ${p}`, reason || "");
+  return true;
+}
+
 export async function approveMission(id: string, approved: boolean) {
   const m = await getMission(id);
   if (!m || m.status !== "needs_approval" || !m.pending.length) return;
@@ -533,60 +572,46 @@ export async function approveMission(id: string, approved: boolean) {
 // mission store so it's a single indexed DELETE, not a whole-store rewrite.)
 const MISSION_CAP = 1000;
 
-/* ---- the autonomous kernel: the OS's own heartbeat ----
+/* ---- the autonomous kernel: the OS's own heartbeat (M2: Objective Reasoning) ----
  *
- * Turns Evolution OS from reactive (runs only what a human types) into an
- * operating system that works for you: on a schedule it PERCEIVES your world
- * (inbox, calendar, brain state), DECIDES what needs attention, and SURFACES a
- * briefing + concrete follow-ups — reusing the same persistent, exactly-once
- * mission engine. It only OBSERVES and surfaces; any outward action still runs
- * as a separate, authorized mission. Opt-in (ongoing model spend), so it stays
- * off until KERNEL_ENABLED=true; cadence via KERNEL_EVERY_MIN (default daily). */
-const KERNEL_MARKER = "[KERNEL] Autonomous briefing";
-const KERNEL_EVERY_MS = Math.max(5, Number(process.env.KERNEL_EVERY_MIN) || 1440) * 60_000;
-const KERNEL_OBJECTIVE =
-  `${KERNEL_MARKER}. You are Evolution OS's autonomous EXECUTIVE ASSISTANT. Do not wait to be told what to do — ` +
-  `PROACTIVELY decide what matters and prepare the work. Absolute safety rule: NEVER commit anything outward or ` +
-  `irreversible without the user's approval — do NOT use send_email or create_calendar_event. Everything you do ` +
-  `is idempotent, so running every few hours is safe.\n` +
-  `PHASE 1 — PERCEIVE everything: read_recent_email (unread, last ~2 days); list_calendar (next ~3 days); ` +
-  `list_pending_work (open tasks + active missions); and use what you already know about contacts and deals.\n` +
-  `PHASE 2 — DECIDE & PRIORITIZE: judge what the user should focus on. Call set_priorities ONCE with the full ` +
-  `ranked list — for each item give urgency (1-5), importance (1-5), a deadline if there is one, dependsOn if it's ` +
-  `blocked, a concrete recommendedAction, a source, and a REQUIRED \`why\` in plain language. This publishes the ` +
-  `unified Priority Queue (ranking is computed from your signals).\n` +
-  `PHASE 3 — EXECUTE the safe work for the top priorities, without asking:\n` +
-  `  • draft_email a concise professional reply for each email that needs one (DRAFTS a Gmail draft, never sends);\n` +
-  `  • suggest_calendar_event to QUEUE any needed meeting/follow-up for approval (never creates it);\n` +
-  `  • create_task for concrete follow-ups the user must do personally;\n` +
-  `  • add_contact to keep the CRM current for anyone you engaged (idempotent upsert);\n` +
-  `  • create_note titled "Summary: <subject/meeting>" for anything worth summarizing.\n` +
-  `PHASE 4 — REPORT: update the single note titled "Briefing" (upserts by title) with today's prioritized ` +
-  `summary, and in your final message list the TOP priorities (each with its one-line WHY) and the autonomous ` +
-  `actions you prepared.\n` +
-  `PHASE 5 — WEEKLY DIGEST: call prepare_weekly_digest ONCE to prepare a Gmail DRAFT (never sent) summarizing the ` +
-  `week's top priorities, completed missions, and open follow-ups. It is idempotent per ISO week — safe to call ` +
-  `every run: it creates at most one digest draft per week and never sends mail or creates calendar events.\n` +
-  `If Google isn't connected, say so plainly and prioritize from the internal brain state.`;
+ * The kernel is no longer a single global "briefing" mission. It is a per-objective
+ * PLANNER: on a cadence it evaluates EVERY active objective and decides the work
+ * that should exist — creating, pausing, resuming, completing, and reprioritizing
+ * missions, and keeping each objective's evolving `state` + Priority-Queue slice
+ * current (see objectivePlanner.ts). Everything it spawns runs through this same
+ * persistent, exactly-once engine and still cannot act outward without approval.
+ * Opt-in (ongoing model spend): off until KERNEL_ENABLED=true; cadence via
+ * KERNEL_EVERY_MIN. Each objective is additionally rate-limited by the planner's
+ * own re-review interval, so a fast cadence is safe and cheap. */
+const KERNEL_MARKER = "[KERNEL]"; // legacy global-briefing missions to retire
+const KERNEL_EVERY_MS = Math.max(5, Number(process.env.KERNEL_EVERY_MIN) || 240) * 60_000;
 
-/** Ensure exactly one recurring kernel briefing with the CURRENT objective is
- *  live (if enabled). Retires a stale kernel from a previous deploy so objective
- *  updates take effect — missions store their objective at creation, so a
- *  recurring one would otherwise re-spawn the old workflow forever. */
+/** Retire any legacy global-briefing kernel missions from a previous deploy. The
+ *  reasoning loop is now the objective planner running in the worker heartbeat —
+ *  the old recurring briefing mission would otherwise keep re-spawning global
+ *  triage and clobbering the objective-scoped Priority Queue. */
 async function ensureKernel() {
-  if (process.env.KERNEL_ENABLED !== "true") return;
   const views = await listMissionViews();
-  const liveKernels = views.filter(
+  const legacy = views.filter(
     (v) => v.objective.startsWith(KERNEL_MARKER) && v.status !== "done" && v.status !== "failed"
   );
-  if (liveKernels.some((v) => v.objective === KERNEL_OBJECTIVE)) return; // already current
-  for (const v of liveKernels) await cancelMission(v.id); // retire stale/duplicate kernels
-  await createMission(KERNEL_OBJECTIVE, {
-    recurrence: { everyMs: KERNEL_EVERY_MS },
-    scheduledFor: Date.now() + 60_000,
-  });
-  // eslint-disable-next-line no-console
-  console.log(`[Evolution OS] autonomous kernel (re)seeded with current objective (every ${Math.round(KERNEL_EVERY_MS / 60_000)}m)`);
+  for (const v of legacy) await cancelMission(v.id);
+  if (legacy.length) {
+    // eslint-disable-next-line no-console
+    console.log(`[Evolution OS] retired ${legacy.length} legacy briefing kernel(s) — reasoning is now per-objective`);
+  }
+}
+
+/** One heartbeat of the reasoning loop: plan every active objective. Guarded by
+ *  KERNEL_ENABLED; each objective is rate-limited inside the planner. */
+async function runKernelPlanning() {
+  if (process.env.KERNEL_ENABLED !== "true") return;
+  const { planAllObjectives } = await import("@/lib/server/objectivePlanner");
+  const r = await planAllObjectives();
+  if (r.count) {
+    // eslint-disable-next-line no-console
+    console.log(`[Evolution OS] objective planner: reviewed ${r.count} objective(s)`);
+  }
 }
 
 /* ---- background worker ---- */
@@ -616,6 +641,7 @@ export function startWorker() {
   let lastBeat = 0;
   let lastPrune = 0;
   let lastEvents = 0;
+  let lastPlan = 0;
   const tick = async () => {
     try {
       // Throttled liveness beat so /api/health can confirm the runtime is alive.
@@ -634,6 +660,13 @@ export function startWorker() {
       if (Date.now() - lastEvents > 90_000) {
         lastEvents = Date.now();
         (await import("@/lib/server/eventEngine")).runEventEngine().catch(() => {});
+      }
+      // Objective Planner heartbeat (M2): re-reason every active objective on the
+      // kernel cadence. Each objective is further rate-limited inside the planner,
+      // so this only spends model tokens when an objective is actually due.
+      if (process.env.KERNEL_ENABLED === "true" && Date.now() - lastPlan > KERNEL_EVERY_MS) {
+        lastPlan = Date.now();
+        runKernelPlanning().catch(() => {});
       }
       // Candidates: queued-and-due work, plus missions whose worker died (lapsed
       // lease). We ATOMICALLY claim each before running it, so across any number

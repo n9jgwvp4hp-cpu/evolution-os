@@ -1,5 +1,5 @@
 import { mutate, read, uid } from "@/lib/server/db";
-import type { Task, Contact, Deal, Note, Memory, Priority, LeadStatus, DealStage, BrainKind } from "@/lib/types";
+import type { Task, Contact, Deal, Note, Memory, Priority, LeadStatus, DealStage, BrainKind, Objective } from "@/lib/types";
 
 /**
  * The brain's write/read operations — one source of truth for every entity.
@@ -21,7 +21,9 @@ export function isBrainKind(k: string): k is BrainKind {
  * not from the model's own ordering. Replaces the queue each cycle (idempotent;
  * always reflects the latest analysis). Every item must carry a `why`.
  */
-export async function setPriorities(a: any) {
+/** Deterministic score + normalization for one recommendation. Shared by the
+ *  global queue and per-objective planning so ranking is identical everywhere. */
+function toPriority(it: any, fallbackObjectiveId: string | null = null): Priority {
   const clamp = (n: any) => Math.max(1, Math.min(5, Math.round(Number(n) || 3)));
   const deadlineBoost = (iso?: string): number => {
     if (!iso) return 0;
@@ -35,31 +37,74 @@ export async function setPriorities(a: any) {
     return 5;
   };
   const now = Date.now();
+  const urgency = clamp(it.urgency);
+  const importance = clamp(it.importance);
+  const blocked = Boolean(it.dependsOn && String(it.dependsOn).trim());
+  const score = importance * 20 + urgency * 20 + deadlineBoost(it.deadline) - (blocked ? 15 : 0);
+  return {
+    id: uid(),
+    objectiveId: it.objectiveId ? String(it.objectiveId) : fallbackObjectiveId, // ladder each recommendation to its objective
+    title: String(it.title).slice(0, 200),
+    category: (["email", "calendar", "crm", "mission", "task", "other"].includes(it.category) ? it.category : "other") as Priority["category"],
+    urgency, importance,
+    deadline: it.deadline ? String(it.deadline) : undefined,
+    dependsOn: blocked ? String(it.dependsOn) : undefined,
+    score,
+    recommendedAction: String(it.recommendedAction || "").slice(0, 300),
+    why: String(it.why).slice(0, 400),
+    source: String(it.source || "").slice(0, 120),
+    createdAt: now, updatedAt: now,
+  };
+}
+
+export async function setPriorities(a: any) {
   const items: Priority[] = (Array.isArray(a.items) ? a.items : [])
     .filter((it: any) => it && it.title && it.why) // a recommendation MUST explain why
     .slice(0, 25)
-    .map((it: any): Priority => {
-      const urgency = clamp(it.urgency);
-      const importance = clamp(it.importance);
-      const blocked = Boolean(it.dependsOn && String(it.dependsOn).trim());
-      const score = importance * 20 + urgency * 20 + deadlineBoost(it.deadline) - (blocked ? 15 : 0);
-      return {
-        id: uid(),
-        title: String(it.title).slice(0, 200),
-        category: (["email", "calendar", "crm", "mission", "task", "other"].includes(it.category) ? it.category : "other") as Priority["category"],
-        urgency, importance,
-        deadline: it.deadline ? String(it.deadline) : undefined,
-        dependsOn: blocked ? String(it.dependsOn) : undefined,
-        score,
-        recommendedAction: String(it.recommendedAction || "").slice(0, 300),
-        why: String(it.why).slice(0, 400),
-        source: String(it.source || "").slice(0, 120),
-        createdAt: now, updatedAt: now,
-      };
-    })
+    .map((it: any) => toPriority(it))
     .sort((x: Priority, y: Priority) => y.score - x.score);
   await mutate((db) => { db.priorities = items; });
   return { ok: true, ranked: items.length, top: items.slice(0, 5).map((p) => ({ score: p.score, title: p.title, why: p.why })) };
+}
+
+/**
+ * Replace ONLY one objective's slice of the Priority Queue, preserving every
+ * other objective's items. This is how the per-objective planner publishes its
+ * recommendations without clobbering the rest of the queue. Re-sorts the whole
+ * queue by score so the unified list stays coherent.
+ */
+export async function replaceObjectivePriorities(objectiveId: string, rawItems: any[]) {
+  const fresh = (Array.isArray(rawItems) ? rawItems : [])
+    .filter((it) => it && it.title && it.why)
+    .slice(0, 15)
+    .map((it) => toPriority(it, objectiveId));
+  await mutate((db) => {
+    const others = (db.priorities || []).filter((p) => p.objectiveId !== objectiveId);
+    db.priorities = [...others, ...fresh].sort((x, y) => y.score - x.score).slice(0, 40);
+  });
+  return { ranked: fresh.length, top: fresh.slice(0, 5).map((p) => ({ score: p.score, title: p.title, why: p.why })) };
+}
+
+/* ---- Objectives (top of the hierarchy) ---- */
+export async function listObjectives(): Promise<Objective[]> {
+  return read((db) => db.objectives || []);
+}
+export async function listActiveObjectives(): Promise<Objective[]> {
+  return read((db) => (db.objectives || []).filter((o) => o.status === "active"));
+}
+export async function getObjective(id: string): Promise<Objective | undefined> {
+  return read((db) => (db.objectives || []).find((o) => o.id === id));
+}
+/** Patch an objective's evolving fields (state/progress/status/lastReviewedAt/…). */
+export async function patchObjective(id: string, p: Partial<Objective>): Promise<Objective | undefined> {
+  let out: Objective | undefined;
+  await mutate((db) => {
+    const o = (db.objectives || []).find((x) => x.id === id);
+    if (!o) return;
+    Object.assign(o, p, { updatedAt: Date.now() });
+    out = o;
+  });
+  return out;
 }
 
 /* ---- generic collection access (module views) ---- */
