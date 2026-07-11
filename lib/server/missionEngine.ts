@@ -15,11 +15,12 @@ import {
   cancelMissionRow,
   pruneMissions as storePrune,
   missionStatuses,
+  deleteMissions as storeDeleteMissions,
 } from "@/lib/server/missionStore";
 import { getServerTool, serverToolSchemas } from "@/lib/server/tools";
 import { buildBrainContext } from "@/lib/server/data";
 import { runWithMissionContext } from "@/lib/server/missionContext";
-import type { Mission, MissionStep, MissionApiMsg } from "@/lib/missionTypes";
+import type { Mission, MissionStep, MissionApiMsg, MissionSeed } from "@/lib/missionTypes";
 
 export { getMission };
 
@@ -94,7 +95,7 @@ async function logStatus(id: string, label: string, detail?: string) {
 
 export async function createMission(
   objective: string,
-  opts: { scheduledFor?: number; recurrence?: { everyMs: number }; trigger?: { rule: string; event: string }; objectiveId?: string | null; priority?: number; brandId?: string | null; contactId?: string | null; deadline?: number | null; dependencies?: string[]; progress?: number } = {}
+  opts: { scheduledFor?: number; recurrence?: { everyMs: number }; trigger?: { rule: string; event: string }; objectiveId?: string | null; priority?: number; brandId?: string | null; contactId?: string | null; deadline?: number | null; dependencies?: string[]; progress?: number; childSeeds?: MissionSeed[]; parentMissionId?: string | null; treeRootId?: string | null } = {}
 ): Promise<Mission> {
   const scheduled = opts.scheduledFor && opts.scheduledFor > Date.now() ? opts.scheduledFor : undefined;
   const m: Mission = {
@@ -107,6 +108,9 @@ export async function createMission(
     deadline: opts.deadline ?? null,
     dependencies: Array.isArray(opts.dependencies) ? opts.dependencies : [],
     progress: Math.max(0, Math.min(100, Math.round(Number(opts.progress) || 0))),
+    childSeeds: Array.isArray(opts.childSeeds) ? opts.childSeeds : [],
+    parentMissionId: opts.parentMissionId ?? null,
+    treeRootId: opts.treeRootId ?? null,
     status: "queued",
     steps: [
       { id: uid(), ts: Date.now(), kind: "status", text: "Queued", detail: scheduled ? `scheduled for ${new Date(scheduled).toISOString()}` : undefined },
@@ -435,8 +439,8 @@ async function finalize(id: string, candidate: string) {
   await clearApi(id);
   await releaseLease(id);
   await logStatus(id, "Completed");
-  // Feed the activity feed + advance the linked CRM lead through the pipeline.
-  { const done = await getMission(id); if (done) import("@/lib/server/missionHooks").then((h) => h.onMissionCompleted(done)).catch(() => {}); }
+  // Dependency tree: completing this mission materializes its direct children.
+  { const done = await getMission(id); if (done) { await spawnChildren(done).catch(() => {}); import("@/lib/server/missionHooks").then((h) => h.onMissionCompleted(done)).catch(() => {}); } }
 
   // Recurring missions queue their next run — but re-read first, so a mission
   // canceled mid-run (recurrence cleared) does NOT spawn another occurrence.
@@ -553,6 +557,70 @@ async function runMissionBody(id: string) {
  */
 export async function cancelMission(id: string) {
   await cancelMissionRow(id);
+}
+
+/** Hard-delete missions (and their whole subtree if they're tree roots/parents). */
+export async function deleteMission(id: string, opts: { cascadeTree?: boolean } = {}): Promise<number> {
+  const ids = [id];
+  if (opts.cascadeTree) {
+    const { listTreeMissions } = await import("@/lib/server/missionStore");
+    const m = await getMission(id);
+    const root = m?.treeRootId || id;
+    const tree = await listTreeMissions(root);
+    for (const t of tree) if (!ids.includes(t.id)) ids.push(t.id);
+  }
+  return storeDeleteMissions(ids);
+}
+export async function deleteMissionsByIds(ids: string[]): Promise<number> {
+  return storeDeleteMissions(ids);
+}
+
+/* ---- Dependency trees ----
+ * Plant a tree: the ROOT mission is created now carrying the seeds of its direct
+ * children; each child materializes only when its parent COMPLETES (see
+ * spawnChildren, invoked from finalize). So the tree grows one level at a time as
+ * prerequisites finish — true dependency-driven expansion, not a flat batch. */
+export async function createMissionTree(
+  tree: MissionSeed,
+  opts: { brandId?: string | null; objectiveId?: string | null; deadlineDaysPerLevel?: number } = {}
+): Promise<Mission> {
+  const perLevel = opts.deadlineDaysPerLevel ?? 3;
+  const root = await createMission(tree.objective, {
+    brandId: opts.brandId ?? null,
+    objectiveId: opts.objectiveId ?? null,
+    childSeeds: tree.children ?? [],
+    deadline: Date.now() + perLevel * 24 * 60 * 60_000,
+    priority: 10,
+  });
+  // The root's tree id is itself — descendants inherit it.
+  await patch(root.id, { treeRootId: root.id });
+  return { ...root, treeRootId: root.id };
+}
+
+/** When a mission with child seeds completes, materialize its direct children as
+ *  real missions (each carrying its own child seeds + a dependency on the parent). */
+async function spawnChildren(parent: Mission): Promise<void> {
+  const seeds = parent.childSeeds || [];
+  if (!seeds.length) return;
+  const rootId = parent.treeRootId || parent.id;
+  // Depth for deadline staggering: count ancestors via tree traversal is overkill;
+  // use a modest fixed window per spawned level.
+  for (const seed of seeds) {
+    const child = await createMission(seed.objective, {
+      brandId: parent.brandId ?? null,
+      objectiveId: parent.objectiveId ?? null,
+      parentMissionId: parent.id,
+      treeRootId: rootId,
+      childSeeds: seed.children ?? [],
+      dependencies: [parent.id], // records the tree edge (parent already done ⇒ runnable)
+      deadline: Date.now() + 3 * 24 * 60 * 60_000,
+      priority: Math.max(1, (parent.priority ?? 1) - 1),
+    });
+    await logT(parent.id, `spawned child mission ${child.id}`, seed.objective.slice(0, 60));
+  }
+  // Seeds are now realized as real missions — clear them so the tree view shows
+  // realized children (not duplicated pending seeds).
+  await patch(parent.id, { childSeeds: [] });
 }
 
 /* ---- Objective-Planner lifecycle controls ----

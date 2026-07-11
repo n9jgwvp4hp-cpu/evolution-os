@@ -46,6 +46,18 @@ export type MissionApiMsg = {
 
 export type PendingCall = { call: any; summary: string };
 
+/**
+ * A node in a dependency tree. A mission carries the seeds of its DIRECT children;
+ * when the mission completes, each child seed is materialized into a real mission
+ * (carrying its own child seeds), so the tree expands one level at a time as
+ * prerequisites finish. This is how "missions create child missions automatically
+ * when prerequisites are completed" works.
+ */
+export type MissionSeed = {
+  objective: string;
+  children?: MissionSeed[];
+};
+
 export type Mission = {
   id: string;
   objective: string;
@@ -56,6 +68,10 @@ export type Mission = {
   deadline?: number | null;     // epoch ms target completion (surfaced; overdue = escalated)
   dependencies?: string[];      // mission ids that must complete before this one may run
   progress?: number;            // 0–100 completion estimate (auto-updated as it runs)
+  // ---- dependency tree ----
+  childSeeds?: MissionSeed[];       // direct children spawned when THIS mission completes
+  parentMissionId?: string | null;  // the mission that spawned this one (lineage)
+  treeRootId?: string | null;       // groups every mission in the same dependency tree
   status: MissionStatus;
   steps: MissionStep[];
   api: MissionApiMsg[]; // running model conversation — enables resume after restart

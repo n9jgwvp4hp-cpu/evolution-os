@@ -56,6 +56,9 @@ function initPg(): Promise<void> {
           deadline BIGINT,
           dependencies JSONB NOT NULL DEFAULT '[]'::jsonb,
           progress INT NOT NULL DEFAULT 0,
+          child_seeds JSONB NOT NULL DEFAULT '[]'::jsonb,
+          parent_mission_id TEXT,
+          tree_root_id TEXT,
           created_at BIGINT NOT NULL,
           updated_at BIGINT NOT NULL
         )`);
@@ -69,6 +72,9 @@ function initPg(): Promise<void> {
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS deadline BIGINT`);
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS dependencies JSONB NOT NULL DEFAULT '[]'::jsonb`);
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS progress INT NOT NULL DEFAULT 0`);
+      await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS child_seeds JSONB NOT NULL DEFAULT '[]'::jsonb`);
+      await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS parent_mission_id TEXT`);
+      await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS tree_root_id TEXT`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_status_sched ON missions (status, scheduled_for)`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_created ON missions (created_at DESC)`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_lease ON missions (status, lease_expires)`);
@@ -132,8 +138,8 @@ async function insertMissionTx(client: PoolClient, m: Mission): Promise<void> {
   await client.query(
     `INSERT INTO missions
        (id, objective, status, result, qc_left, attempts, acknowledged, pending,
-        pending_decision, scheduled_for, recurrence_every_ms, objective_id, priority, brand_id, contact_id, deadline, dependencies, progress, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+        pending_decision, scheduled_for, recurrence_every_ms, objective_id, priority, brand_id, contact_id, deadline, dependencies, progress, child_seeds, parent_mission_id, tree_root_id, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
      ON CONFLICT (id) DO NOTHING`,
     [
       m.id, m.objective, m.status, m.result ?? null, m.qcLeft ?? 2, m.attempts ?? 0,
@@ -142,6 +148,7 @@ async function insertMissionTx(client: PoolClient, m: Mission): Promise<void> {
       m.scheduledFor ?? null, m.recurrence?.everyMs ?? null, m.objectiveId ?? null,
       m.priority ?? 0, m.brandId ?? null, m.contactId ?? null,
       m.deadline ?? null, JSON.stringify(m.dependencies ?? []), m.progress ?? 0,
+      JSON.stringify(m.childSeeds ?? []), m.parentMissionId ?? null, m.treeRootId ?? null,
       m.createdAt, m.updatedAt,
     ]
   );
@@ -180,6 +187,9 @@ function rowToMission(r: any, steps: MissionStep[], api: MissionApiMsg[]): Missi
     deadline: r.deadline != null ? Number(r.deadline) : null,
     dependencies: Array.isArray(r.dependencies) ? r.dependencies : [],
     progress: r.progress != null ? Number(r.progress) : 0,
+    childSeeds: Array.isArray(r.child_seeds) ? r.child_seeds : [],
+    parentMissionId: r.parent_mission_id ?? null,
+    treeRootId: r.tree_root_id ?? null,
     workerId: r.worker_id ?? undefined,
     leaseExpires: r.lease_expires != null ? Number(r.lease_expires) : undefined,
     createdAt: Number(r.created_at),
@@ -210,6 +220,9 @@ const PATCH_COLS: Record<string, { col: string; val: (v: any) => any }> = {
   deadline: { col: "deadline", val: (v) => v ?? null },
   dependencies: { col: "dependencies", val: (v) => JSON.stringify(v ?? []) },
   progress: { col: "progress", val: (v) => Math.max(0, Math.min(100, Math.round(Number(v) || 0))) },
+  childSeeds: { col: "child_seeds", val: (v) => JSON.stringify(v ?? []) },
+  parentMissionId: { col: "parent_mission_id", val: (v) => v ?? null },
+  treeRootId: { col: "tree_root_id", val: (v) => v ?? null },
 };
 
 /* ============================== File ============================== */
@@ -544,6 +557,43 @@ export async function trimTerminalApi(): Promise<void> {
   await fileMutate((list) => {
     for (const m of list) if ((m.status === "done" || m.status === "failed") && m.api.length) m.api = [];
   });
+}
+
+/** Hard-delete missions (cascades steps + api via FK ON DELETE CASCADE). Used to
+ *  remove demonstration / one-off missions entirely, not just terminate them. */
+export async function deleteMissions(ids: string[]): Promise<number> {
+  if (!ids.length) return 0;
+  if (USE_PG) {
+    await initPg();
+    const { rowCount } = await getPool().query("DELETE FROM missions WHERE id = ANY($1)", [ids]);
+    return rowCount || 0;
+  }
+  let n = 0;
+  await fileMutate((list) => {
+    const set = new Set(ids);
+    for (let i = list.length - 1; i >= 0; i--) if (set.has(list[i].id)) { list.splice(i, 1); n++; }
+  });
+  return n;
+}
+
+/** All missions belonging to one dependency tree (root + descendants). */
+export async function listTreeMissions(rootId: string): Promise<MissionView[]> {
+  if (USE_PG) {
+    await initPg();
+    const { rows } = await getPool().query(
+      "SELECT * FROM missions WHERE tree_root_id = $1 OR id = $1 ORDER BY created_at ASC",
+      [rootId]
+    );
+    const stepRows = await getPool().query("SELECT * FROM mission_steps WHERE mission_id = ANY($1) ORDER BY mission_id, seq", [rows.map((r) => r.id)]);
+    const byMission = new Map<string, MissionStep[]>();
+    for (const sr of stepRows.rows) { const arr = byMission.get(sr.mission_id) || []; arr.push(rowToStep(sr)); byMission.set(sr.mission_id, arr); }
+    return rows.map((r) => { const { api, workerId, leaseExpires, ...v } = rowToMission(r, byMission.get(r.id) || [], []); return v; });
+  }
+  return fileRead((list) =>
+    list.filter((m) => m.treeRootId === rootId || m.id === rootId)
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map(({ api, workerId, leaseExpires, ...v }) => v)
+  );
 }
 
 /** Cancel: stop recurrence, clear the approval queue, finalize as done-seen. */
