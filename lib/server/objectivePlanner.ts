@@ -218,6 +218,7 @@ export async function planObjective(objectiveId: string, opts: { force?: boolean
       objectiveId,
       brandId: objective.brandId ?? null, // missions inherit the objective's brand
       priority,
+      deadline: Date.now() + (immediate ? 3 : 7) * 24 * 60 * 60_000, // target completion window
       scheduledFor: immediate ? undefined : Date.now() + 30 * 60_000,
     });
     created.push({ id: m.id, objective: text, immediate, highestValue, priority });

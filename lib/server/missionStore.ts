@@ -53,6 +53,9 @@ function initPg(): Promise<void> {
           brand_id TEXT,
           contact_id TEXT,
           priority INT NOT NULL DEFAULT 0,
+          deadline BIGINT,
+          dependencies JSONB NOT NULL DEFAULT '[]'::jsonb,
+          progress INT NOT NULL DEFAULT 0,
           created_at BIGINT NOT NULL,
           updated_at BIGINT NOT NULL
         )`);
@@ -63,6 +66,9 @@ function initPg(): Promise<void> {
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0`);
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS brand_id TEXT`);
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS contact_id TEXT`);
+      await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS deadline BIGINT`);
+      await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS dependencies JSONB NOT NULL DEFAULT '[]'::jsonb`);
+      await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS progress INT NOT NULL DEFAULT 0`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_status_sched ON missions (status, scheduled_for)`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_created ON missions (created_at DESC)`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_lease ON missions (status, lease_expires)`);
@@ -126,15 +132,17 @@ async function insertMissionTx(client: PoolClient, m: Mission): Promise<void> {
   await client.query(
     `INSERT INTO missions
        (id, objective, status, result, qc_left, attempts, acknowledged, pending,
-        pending_decision, scheduled_for, recurrence_every_ms, objective_id, priority, brand_id, contact_id, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        pending_decision, scheduled_for, recurrence_every_ms, objective_id, priority, brand_id, contact_id, deadline, dependencies, progress, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
      ON CONFLICT (id) DO NOTHING`,
     [
       m.id, m.objective, m.status, m.result ?? null, m.qcLeft ?? 2, m.attempts ?? 0,
       Boolean(m.acknowledged), JSON.stringify(m.pending ?? []),
       m.pendingDecision === undefined ? null : m.pendingDecision,
       m.scheduledFor ?? null, m.recurrence?.everyMs ?? null, m.objectiveId ?? null,
-      m.priority ?? 0, m.brandId ?? null, m.contactId ?? null, m.createdAt, m.updatedAt,
+      m.priority ?? 0, m.brandId ?? null, m.contactId ?? null,
+      m.deadline ?? null, JSON.stringify(m.dependencies ?? []), m.progress ?? 0,
+      m.createdAt, m.updatedAt,
     ]
   );
   for (const s of m.steps ?? []) {
@@ -169,6 +177,9 @@ function rowToMission(r: any, steps: MissionStep[], api: MissionApiMsg[]): Missi
     brandId: r.brand_id ?? null,
     contactId: r.contact_id ?? null,
     priority: r.priority != null ? Number(r.priority) : 0,
+    deadline: r.deadline != null ? Number(r.deadline) : null,
+    dependencies: Array.isArray(r.dependencies) ? r.dependencies : [],
+    progress: r.progress != null ? Number(r.progress) : 0,
     workerId: r.worker_id ?? undefined,
     leaseExpires: r.lease_expires != null ? Number(r.lease_expires) : undefined,
     createdAt: Number(r.created_at),
@@ -196,6 +207,9 @@ const PATCH_COLS: Record<string, { col: string; val: (v: any) => any }> = {
   brandId: { col: "brand_id", val: (v) => v ?? null },
   contactId: { col: "contact_id", val: (v) => v ?? null },
   priority: { col: "priority", val: (v) => Math.round(Number(v) || 0) },
+  deadline: { col: "deadline", val: (v) => v ?? null },
+  dependencies: { col: "dependencies", val: (v) => JSON.stringify(v ?? []) },
+  progress: { col: "progress", val: (v) => Math.max(0, Math.min(100, Math.round(Number(v) || 0))) },
 };
 
 /* ============================== File ============================== */
@@ -329,17 +343,17 @@ export async function listMissionViews(): Promise<MissionView[]> {
  * worker died). Missions actively held by a live worker (valid lease) are
  * excluded, so workers don't fight over them. No steps/api loaded.
  */
-export async function listRunnable(now: number): Promise<Array<{ id: string; status: string }>> {
+export async function listRunnable(now: number): Promise<Array<{ id: string; status: string; dependencies: string[] }>> {
   if (USE_PG) {
     await initPg();
     const { rows } = await getPool().query(
-      `SELECT id, status FROM missions
+      `SELECT id, status, dependencies FROM missions
         WHERE (status = 'queued'  AND (scheduled_for IS NULL OR scheduled_for <= $1))
            OR (status = 'running' AND (lease_expires IS NULL OR lease_expires <= $1))
         ORDER BY priority DESC, created_at ASC`,
       [now]
     );
-    return rows;
+    return rows.map((r) => ({ id: r.id, status: r.status, dependencies: Array.isArray(r.dependencies) ? r.dependencies : [] }));
   }
   return fileRead((list) =>
     list
@@ -349,8 +363,22 @@ export async function listRunnable(now: number): Promise<Array<{ id: string; sta
           (m.status === "running" && (!m.leaseExpires || m.leaseExpires <= now))
       )
       .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0) || a.createdAt - b.createdAt)
-      .map((m) => ({ id: m.id, status: m.status }))
+      .map((m) => ({ id: m.id, status: m.status, dependencies: m.dependencies ?? [] }))
   );
+}
+
+/** Status of a set of mission ids — used to check whether dependencies are met. */
+export async function missionStatuses(ids: string[]): Promise<Record<string, string>> {
+  if (!ids.length) return {};
+  if (USE_PG) {
+    await initPg();
+    const { rows } = await getPool().query(`SELECT id, status FROM missions WHERE id = ANY($1)`, [ids]);
+    return Object.fromEntries(rows.map((r) => [r.id, r.status]));
+  }
+  return fileRead((list) => {
+    const set = new Set(ids);
+    return Object.fromEntries(list.filter((m) => set.has(m.id)).map((m) => [m.id, m.status]));
+  });
 }
 
 /**

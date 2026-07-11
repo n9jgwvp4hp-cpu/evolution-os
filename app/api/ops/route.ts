@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { read, getWorkerHeartbeat, dbBackend } from "@/lib/server/db";
 import { listMissionViews } from "@/lib/server/missionStore";
 import { startWorker } from "@/lib/server/missionEngine";
+import { listActivity } from "@/lib/server/activity";
 import { fetchWithTimeout } from "@/lib/server/http";
 import type { MissionView } from "@/lib/missionTypes";
 
@@ -29,7 +30,8 @@ function enrich(m: MissionView, now: number) {
   const last = steps[steps.length - 1];
   const actionCount = steps.filter((s) => s.kind === "action").length;
   return {
-    id: m.id, objective: m.objective, objectiveId: m.objectiveId ?? null, priority: m.priority ?? 0, status: m.status,
+    id: m.id, objective: m.objective, objectiveId: m.objectiveId ?? null, brandId: m.brandId ?? null, priority: m.priority ?? 0, status: m.status,
+    deadline: m.deadline ?? null, dependencies: m.dependencies ?? [], progress: m.progress ?? 0, acknowledged: !!m.acknowledged,
     createdAt: m.createdAt, updatedAt: m.updatedAt, startedAt, endedAt, durationMs,
     attempts: m.attempts || 0, stepCount: steps.length, actionCount,
     currentStep: last ? last.text : null, // what the mission is doing right now
@@ -97,6 +99,17 @@ export async function GET() {
   const scheduled = all.filter((m) => m.status === "queued" && m.scheduledFor && m.scheduledFor > now).sort((a, b) => (a.scheduledFor! - b.scheduledFor!));
   const history = all.filter((m) => ["done", "failed"].includes(m.status)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 50);
   const errorsRetries = all.filter((m) => m.status === "failed" || m.attempts > 0).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 25);
+
+  // The four command-center sections (autonomous mission system). A queued mission
+  // whose dependencies aren't all done is BLOCKED (waiting on upstream work).
+  const statusById = new Map(all.map((m) => [m.id, m.status]));
+  const depsUnmet = (m: any) => (m.dependencies || []).some((d: string) => statusById.get(d) !== "done");
+  const sections = {
+    inProgress: all.filter((m) => m.status === "running").sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)),
+    blocked: all.filter((m) => m.status === "failed" || m.status === "paused" || (m.status === "queued" && depsUnmet(m))).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 40),
+    waitingApproval: all.filter((m) => m.status === "needs_approval").sort((a, b) => b.updatedAt - a.updatedAt),
+    completedWhileAway: all.filter((m) => m.status === "done" && !m.acknowledged).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 40),
+  };
 
   // kernel
   const km = missions.filter((m) => m.objective.startsWith("[KERNEL]"));
@@ -190,6 +203,10 @@ export async function GET() {
     },
     counts,
     missions: { active, queuedNow, scheduled, history, errorsRetries },
+    // The autonomous mission system's four command-center sections + a live timeline
+    // of every mission the OS creates or completes.
+    sections,
+    missionTimeline: await listActivity({ kinds: ["mission_created", "mission_completed", "mission_failed"], limit: 40 }),
     priorities: brain.priorities,
     recentDecisions,
     draftsAwaitingApproval: gmail.drafts,

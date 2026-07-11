@@ -53,6 +53,9 @@ export type Mission = {
   brandId?: string | null;     // the Brand this mission serves (portfolio scoping)
   contactId?: string | null;   // the CRM lead this mission was generated for (if any)
   priority?: number; // planner rank; higher = claimed sooner among due queued missions (default 0)
+  deadline?: number | null;     // epoch ms target completion (surfaced; overdue = escalated)
+  dependencies?: string[];      // mission ids that must complete before this one may run
+  progress?: number;            // 0–100 completion estimate (auto-updated as it runs)
   status: MissionStatus;
   steps: MissionStep[];
   api: MissionApiMsg[]; // running model conversation — enables resume after restart

@@ -50,6 +50,7 @@ const OPEN = ["queued", "running", "needs_approval", "paused"];
       title: "Grow Prism44",
       description: "Prism44 is an early-stage product. Research the competitive landscape, identify 5 comparable competitors, and prepare an outreach plan. Draft (never send) initial outreach.",
       visionId: created.visionId, metric: "qualified leads", target: "20", current: "0", priority: 4,
+      plan: false, // this suite tests the explicit /plan endpoint, so skip auto-plan-on-create
     }),
   });
   created.objectiveId = o.json?.objective?.id;

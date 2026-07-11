@@ -127,15 +127,22 @@ export async function instantiateForLead(brandId: string, contact: Pick<Contact,
   const leadName = contact.name || "the lead";
   const ids: string[] = [];
   for (const t of templates) {
-    for (const step of [...t.steps].sort((a, b) => a.order - b.order)) {
+    const steps = [...t.steps].sort((a, b) => a.order - b.order);
+    let prevId: string | null = null; // playbook steps run in order — each depends on the previous
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
       const objective = step.objective
         .replace(/\{\{\s*lead\s*\}\}/gi, leadName)
         .replace(/\{\{\s*brand\s*\}\}/gi, brand?.name || "the brand");
       const m = await createMission(objective, {
-        brandId, contactId: contact.id, priority: 3,
+        brandId, contactId: contact.id,
+        priority: Math.max(1, steps.length - i), // earlier steps rank higher
+        dependencies: prevId ? [prevId] : [],
+        deadline: Date.now() + (i + 1) * 24 * 60 * 60_000, // staggered daily deadlines
         scheduledFor: step.offsetMinutes ? Date.now() + step.offsetMinutes * 60_000 : undefined,
       });
       ids.push(m.id);
+      prevId = m.id;
     }
   }
   if (ids.length) {

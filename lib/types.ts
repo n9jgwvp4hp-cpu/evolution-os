@@ -115,6 +115,7 @@ export type BrandNotificationSettings = {
 export type AppSettings = {
   activeBrandId: string | null; // the brand currently in focus (drives the switcher + scoped views)
   personalMigrationDone?: boolean; // one-time: connected personal account moved to the Personal brand
+  objectivesSeeded?: boolean; // one-time: example starter objectives created
 };
 
 export type OnboardingFieldType =

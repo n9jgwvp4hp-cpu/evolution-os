@@ -16,6 +16,7 @@ type Item = { href: string; label: string; hint: string; icon: JSX.Element };
 
 const MODULES: Item[] = [
   { href: "/", label: "Assistant", hint: "Talk to Evolution OS", icon: <IconSpark /> },
+  { href: "/objectives", label: "Objectives", hint: "Outcomes the OS works", icon: <IconTarget /> },
   { href: "/uw-equity", label: "UW Equity", hint: "Portfolio dashboard", icon: <IconBuilding /> },
   { href: "/activity", label: "Activity", hint: "What ran while away", icon: <IconPulse /> },
   { href: "/approvals", label: "Approvals", hint: "Decisions for you", icon: <IconCheck /> },
@@ -151,4 +152,5 @@ function IconNote() { return svg(<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2
 function IconFile() { return svg(<><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M13 2v7h7" /></>); }
 function IconGear() { return svg(<><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></>); }
 function IconBuilding() { return svg(<><rect x="4" y="3" width="16" height="18" rx="1" /><path d="M9 7h1M14 7h1M9 11h1M14 11h1M9 15h1M14 15h1M10 21v-3h4v3" /></>); }
+function IconTarget() { return svg(<><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.5" /></>); }
 function IconTag() { return svg(<><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><circle cx="7" cy="7" r="1.2" /></>); }

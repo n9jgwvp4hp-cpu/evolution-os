@@ -14,6 +14,7 @@ import {
   trimTerminalApi,
   cancelMissionRow,
   pruneMissions as storePrune,
+  missionStatuses,
 } from "@/lib/server/missionStore";
 import { getServerTool, serverToolSchemas } from "@/lib/server/tools";
 import { buildBrainContext } from "@/lib/server/data";
@@ -75,6 +76,14 @@ const patch = (id: string, p: Partial<Mission>) => patchMission(id, p);
 const addStep = (id: string, step: Omit<MissionStep, "id" | "ts">) => storeAddStep(id, step);
 const pushApi = (id: string, msg: MissionApiMsg) => storePushApi(id, msg);
 
+/** True when every dependency mission has completed (done). Failed/pending deps
+ *  keep the dependent mission blocked. */
+async function dependenciesMet(deps: string[]): Promise<boolean> {
+  if (!deps.length) return true;
+  const statuses = await missionStatuses(deps);
+  return deps.every((id) => statuses[id] === "done");
+}
+
 /** Append a durable, timestamped STATUS entry to the mission log (Queued /
  *  Running / Waiting / Completed / Failed) AND mirror it to the worker stdout
  *  log. This is the persistent mission-status history. */
@@ -85,7 +94,7 @@ async function logStatus(id: string, label: string, detail?: string) {
 
 export async function createMission(
   objective: string,
-  opts: { scheduledFor?: number; recurrence?: { everyMs: number }; trigger?: { rule: string; event: string }; objectiveId?: string | null; priority?: number; brandId?: string | null; contactId?: string | null } = {}
+  opts: { scheduledFor?: number; recurrence?: { everyMs: number }; trigger?: { rule: string; event: string }; objectiveId?: string | null; priority?: number; brandId?: string | null; contactId?: string | null; deadline?: number | null; dependencies?: string[]; progress?: number } = {}
 ): Promise<Mission> {
   const scheduled = opts.scheduledFor && opts.scheduledFor > Date.now() ? opts.scheduledFor : undefined;
   const m: Mission = {
@@ -95,6 +104,9 @@ export async function createMission(
     brandId: opts.brandId ?? null,
     contactId: opts.contactId ?? null,
     priority: Math.round(Number(opts.priority) || 0),
+    deadline: opts.deadline ?? null,
+    dependencies: Array.isArray(opts.dependencies) ? opts.dependencies : [],
+    progress: Math.max(0, Math.min(100, Math.round(Number(opts.progress) || 0))),
     status: "queued",
     steps: [
       { id: uid(), ts: Date.now(), kind: "status", text: "Queued", detail: scheduled ? `scheduled for ${new Date(scheduled).toISOString()}` : undefined },
@@ -419,7 +431,7 @@ async function finalize(id: string, candidate: string) {
   await addStep(id, { kind: "result", text: report });
   // Drop the heavy model-conversation history on completion. It's only needed
   // for in-flight resume; keeping it bloats the store as missions accumulate.
-  await patch(id, { status: "done", result: report, pending: [] });
+  await patch(id, { status: "done", result: report, pending: [], progress: 100 });
   await clearApi(id);
   await releaseLease(id);
   await logStatus(id, "Completed");
@@ -450,7 +462,7 @@ export async function runMission(id: string) {
 }
 
 async function runMissionBody(id: string) {
-  await patch(id, { status: "running" });
+  await patch(id, { status: "running", progress: 10 });
   const context = await buildBrainContext();
 
   try {
@@ -474,6 +486,9 @@ async function runMissionBody(id: string) {
 
       const m = await getMission(id);
       if (!m) return;
+
+      // Live progress: ramps toward ~90% across the turn budget until completion.
+      await patch(id, { progress: Math.min(90, 10 + Math.round(((turn + 1) / MAX_TURNS) * 80)) });
 
       const system: MissionApiMsg = { role: "system", content: MISSION_SYSTEM(context) };
       const message = await callModel([system, ...m.api], { tools: true });
@@ -698,6 +713,9 @@ export function startWorker() {
       for (const m of candidates) {
         if (inflight.size >= MAX_CONCURRENT) break;
         if (inflight.has(m.id)) continue;
+        // Dependency gate: a queued mission whose dependencies aren't all done is
+        // BLOCKED — leave it for a later tick (no manual rules; the OS self-orders).
+        if (m.status === "queued" && m.dependencies.length && !(await dependenciesMet(m.dependencies))) continue;
         const won = await claimMission(m.id, WORKER_ID, LEASE_MS);
         if (won) {
           // status 'running' here means the previous worker died mid-execution

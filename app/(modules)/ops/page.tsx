@@ -54,6 +54,43 @@ function Card({ title, right, children }: any) {
   );
 }
 
+/** One of the four autonomous-mission command-center sections. */
+function MissionSection({ title, accent, items, empty, showDeps }: { title: string; accent: string; items: any[]; empty: string; showDeps?: boolean }) {
+  const overdue = (d?: number | null) => d && d < Date.now();
+  return (
+    <div className="glass rounded-2xl p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className={`text-sm font-semibold ${accent}`}>{title}</h3>
+        <span className="text-xs text-slate-500">{items?.length || 0}</span>
+      </div>
+      {!items || items.length === 0 ? (
+        <p className="text-sm text-slate-600">{empty}</p>
+      ) : (
+        <div className="space-y-2 max-h-72 overflow-y-auto">
+          {items.slice(0, 25).map((m) => (
+            <div key={m.id} className="rounded-lg border border-white/10 bg-white/[0.02] p-2.5">
+              <div className="flex items-start gap-2">
+                <span className="flex-1 min-w-0 text-sm text-slate-200 line-clamp-2">{m.objective}</span>
+                <span className="text-[10px] text-slate-500 shrink-0">P{m.priority ?? 0}</span>
+              </div>
+              <div className="mt-1.5 flex items-center gap-2">
+                <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div className="h-full rounded-full bg-gradient-to-r from-accent to-accent2" style={{ width: `${m.progress ?? 0}%` }} />
+                </div>
+                <span className="text-[10px] text-slate-500 w-8 text-right">{m.progress ?? 0}%</span>
+              </div>
+              <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500">
+                {m.deadline && <span className={overdue(m.deadline) ? "text-pink-400" : ""}>{overdue(m.deadline) ? "overdue" : "due"} {new Date(m.deadline).toLocaleDateString()}</span>}
+                {showDeps && (m.dependencies?.length ? <span>· blocked by {m.dependencies.length} dep(s)</span> : m.status === "failed" ? <span>· failed</span> : m.status === "paused" ? <span>· paused</span> : null)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function OpsPage() {
   const [ops, setOps] = useState<any>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -144,6 +181,34 @@ export default function OpsPage() {
         </div>
         <span className="flex items-center gap-2 text-xs text-emerald-300"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /> live</span>
       </div>
+
+      {/* Autonomous mission system — the four sections + timeline. */}
+      {ops.sections && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <MissionSection title="In progress" accent="text-sky-300" items={ops.sections.inProgress} empty="Nothing running right now." />
+          <MissionSection title="Waiting for approval" accent="text-violet-300" items={ops.sections.waitingApproval} empty="No decisions needed." />
+          <MissionSection title="Blocked" accent="text-amber-300" items={ops.sections.blocked} empty="Nothing blocked." showDeps />
+          <MissionSection title="Completed while away" accent="text-emerald-300" items={ops.sections.completedWhileAway} empty="All caught up." />
+        </div>
+      )}
+
+      {ops.missionTimeline && (
+        <Card title="Timeline" right={<span className="text-xs text-slate-500">every mission created + completed</span>}>
+          {ops.missionTimeline.length === 0 ? (
+            <p className="text-sm text-slate-500">No mission activity yet.</p>
+          ) : (
+            <div className="space-y-1.5 max-h-80 overflow-y-auto">
+              {ops.missionTimeline.map((a: any) => (
+                <div key={a.id} className="flex items-start gap-2 text-sm">
+                  <span>{a.kind === "mission_completed" ? "✅" : a.kind === "mission_failed" ? "⛔" : "🚀"}</span>
+                  <span className="flex-1 min-w-0 text-slate-300">{a.title}</span>
+                  <span className="text-[11px] text-slate-600 shrink-0">{fmtWhen(a.createdAt)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* quick actions — one-tap mission templates */}
       <Card title="Quick Actions" right={launchNote && <span className="text-xs text-slate-400">{launchNote}</span>}>

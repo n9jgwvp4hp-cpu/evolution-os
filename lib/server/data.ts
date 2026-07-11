@@ -86,10 +86,46 @@ export async function replaceObjectivePriorities(objectiveId: string, rawItems: 
 }
 
 /* ---- Objectives (top of the hierarchy) ---- */
+
+/** Seed the example starter objectives once (Grow Prism44, Scale Quality
+ *  Management, Acquire multifamily properties, Expand UW Equity), each tied to its
+ *  brand. Guarded by a settings flag so it never re-creates deleted objectives. */
+export async function ensureObjectivesSeeded(): Promise<void> {
+  const done = await read((db) => db.settings?.objectivesSeeded === true);
+  if (done) return;
+  const { listBrands } = await import("@/lib/server/brands");
+  const brands = await listBrands();
+  const byName = (n: string) => brands.find((b) => b.name === n)?.id ?? null;
+  const now = Date.now();
+  const examples = [
+    { title: "Grow Prism44", brandId: byName("Prism44"), description: "Grow Prism44's client base, content output, and revenue.", metric: "qualified leads", target: "20" },
+    { title: "Scale Quality Management", brandId: byName("Quality Management"), description: "Scale Quality Management's jobs, crews, and completed work.", metric: "active jobs", target: "15" },
+    { title: "Acquire multifamily properties", brandId: byName("UW Equity"), description: "Source, underwrite, and acquire multifamily properties.", metric: "units acquired", target: "50" },
+    { title: "Expand UW Equity", brandId: byName("UW Equity"), description: "Expand the UW Equity portfolio, capital base, and investor network.", metric: "AUM", target: "$10M" },
+  ];
+  await mutate((db) => {
+    if (db.settings?.objectivesSeeded) return;
+    const existing = new Set((db.objectives || []).map((o) => o.title.toLowerCase()));
+    const seeded: Objective[] = [];
+    for (const e of examples) {
+      if (existing.has(e.title.toLowerCase())) continue;
+      seeded.push({
+        id: uid(), brandId: e.brandId, visionId: null, title: e.title, description: e.description,
+        metric: e.metric, target: e.target, current: "0", status: "active", priority: 3,
+        state: "new", progress: 0, createdAt: now, updatedAt: now, lastReviewedAt: null,
+      });
+    }
+    db.objectives = [...seeded, ...(db.objectives || [])];
+    db.settings = { ...(db.settings || { activeBrandId: null }), objectivesSeeded: true };
+  });
+}
+
 export async function listObjectives(): Promise<Objective[]> {
+  await ensureObjectivesSeeded();
   return read((db) => db.objectives || []);
 }
 export async function listActiveObjectives(): Promise<Objective[]> {
+  await ensureObjectivesSeeded();
   return read((db) => (db.objectives || []).filter((o) => o.status === "active"));
 }
 export async function getObjective(id: string): Promise<Objective | undefined> {
