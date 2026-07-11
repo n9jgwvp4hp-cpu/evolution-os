@@ -17,6 +17,7 @@ import {
 } from "@/lib/server/missionStore";
 import { getServerTool, serverToolSchemas } from "@/lib/server/tools";
 import { buildBrainContext } from "@/lib/server/data";
+import { runWithMissionContext } from "@/lib/server/missionContext";
 import type { Mission, MissionStep, MissionApiMsg } from "@/lib/missionTypes";
 
 export { getMission };
@@ -440,6 +441,15 @@ async function finalize(id: string, candidate: string) {
 export async function runMission(id: string) {
   const startMission = await getMission(id);
   if (!startMission || startMission.status === "done" || startMission.status === "failed") return;
+  // Bind the brand context for this run so every tool the mission calls (Gmail /
+  // Calendar) resolves the correct brand's Google account automatically.
+  return runWithMissionContext(
+    { brandId: startMission.brandId ?? null, contactId: startMission.contactId ?? null },
+    () => runMissionBody(id),
+  );
+}
+
+async function runMissionBody(id: string) {
   await patch(id, { status: "running" });
   const context = await buildBrainContext();
 

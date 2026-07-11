@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeCode, writeTokens } from "@/lib/google";
 import { saveGoogleTokens } from "@/lib/server/google";
+import { saveBrandTokens } from "@/lib/server/brandGoogle";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,20 +32,29 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
   const error = url.searchParams.get("error");
+  const stateRaw = url.searchParams.get("state");
   const base = publicOrigin(req);
 
-  if (error) {
-    return NextResponse.redirect(`${base}/connections?google=denied`);
+  // Decode the target brand (if this was a per-brand connect).
+  let brandId: string | null = null;
+  if (stateRaw) {
+    try { brandId = JSON.parse(Buffer.from(stateRaw, "base64url").toString("utf8")).brandId ?? null; } catch { /* ignore */ }
   }
-  if (!code) {
-    return NextResponse.redirect(`${base}/connections?google=missing_code`);
-  }
+  const done = (q: string) => `${base}/connections?google=${q}${brandId ? `&brandId=${brandId}` : ""}`;
+
+  if (error) return NextResponse.redirect(done("denied"));
+  if (!code) return NextResponse.redirect(done("missing_code"));
 
   try {
     const tokens = await exchangeCode(code);
     writeTokens(tokens); // cookie — Conversation Mode
-    await saveGoogleTokens(tokens); // brain — lets background missions act too
-    return NextResponse.redirect(`${base}/connections?google=connected`);
+    if (brandId) {
+      // Per-brand connection: store under this brand (also syncs legacy when parent).
+      await saveBrandTokens(brandId, tokens);
+    } else {
+      await saveGoogleTokens(tokens); // legacy single-account path
+    }
+    return NextResponse.redirect(done("connected"));
   } catch (e: any) {
     const msg = e?.message || String(e);
     // Surfaces in the runtime logs for diagnosis (no secrets in OAuth errors).

@@ -51,7 +51,8 @@ export type Shape = {
   orchestrator: OrchestratorStatus | null; // continuous workflow orchestrator status
   automationRules: AutomationRule[]; // event-driven automation rules
   eventLog: TriggerEvent[]; // recent trigger fires (bounded)
-  google: GoogleTokens | null;
+  google: GoogleTokens | null; // legacy/primary connection (migrated into UW Equity's slot)
+  brandGoogle: Record<string, GoogleTokens>; // per-brand Google OAuth tokens, keyed by brandId
   workerHeartbeat: number | null; // last time the mission worker ticked
 };
 
@@ -77,6 +78,7 @@ const empty: Shape = {
   automationRules: [],
   eventLog: [],
   google: null,
+  brandGoogle: {},
   workerHeartbeat: null,
 };
 const merge = (state: any): Shape => ({ ...empty, ...(state || {}) });

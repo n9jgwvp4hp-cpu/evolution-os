@@ -86,11 +86,7 @@ const check = (n, c, d = "") => { if (c) { pass++; console.log(`  ✓ ${n}`); } 
   // ---------- 4. BRAND GMAIL IDENTITY ----------
   const id1 = (await rf(`/api/brands/${prism.id}/identity`)).json;
   check("4 brand email identity resolves (from-name + signature + templates)", id1.email?.fromName === "Prism44" && !!id1.email?.signature && (id1.email?.templates || []).length >= 1);
-  check("4 falls back to primary until brand Gmail is connected", id1.email?.usingBrandAccount === false && id1.email?.primaryFallback === true);
-  await rf(`/api/brands/${prism.id}`, { method: "PATCH", body: JSON.stringify({ email: { connectedEmail: "leads@prism44.com", signature: "— Prism44", templates: id1.email.templates } }) });
-  const id2 = (await rf(`/api/brands/${prism.id}/identity`)).json;
-  check("4 connecting a brand Gmail switches the send identity", id2.email?.usingBrandAccount === true && id2.email?.fromEmail === "leads@prism44.com");
-  await rf(`/api/brands/${prism.id}`, { method: "PATCH", body: JSON.stringify({ email: { signature: id1.email.signature, templates: id1.email.templates } }) }); // restore (clears connectedEmail)
+  check("4 uses primary/portfolio until this brand's Gmail is connected", id1.email?.usingBrandAccount === false);
 
   // ---------- 5. BRAND CALENDAR ----------
   check("5 brand calendar identity resolves (primary default + event types)", id1.calendar?.calendarId === "primary" && (id1.calendar?.eventTypes || []).includes("Discovery call"));

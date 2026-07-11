@@ -1,4 +1,5 @@
 import { read } from "@/lib/server/db";
+import { listBrandConnections } from "@/lib/server/brandGoogle";
 import type { EmailTemplate } from "@/lib/types";
 
 /**
@@ -13,35 +14,37 @@ import type { EmailTemplate } from "@/lib/types";
  */
 
 export async function resolveBrandEmail(brandId?: string | null) {
-  return read((db) => {
-    const brand = (db.brands || []).find((b) => b.id === brandId) || null;
-    const primary = db.google?.email || null;
-    const cfg = brand?.email;
-    return {
-      brandId: brand?.id ?? null,
-      brandName: brand?.name ?? null,
-      fromName: cfg?.fromName || brand?.name || undefined,
-      // The address mail is sent from: the brand's own Gmail if connected, else primary.
-      fromEmail: cfg?.connectedEmail || primary,
-      usingBrandAccount: !!cfg?.connectedEmail,
-      primaryFallback: !cfg?.connectedEmail,
-      signature: cfg?.signature || "",
-      templates: cfg?.templates || [],
-    };
-  });
+  const brand = await read((db) => (db.brands || []).find((b) => b.id === brandId) || null);
+  const conn = (await listBrandConnections()).find((c) => c.brandId === brandId) || null;
+  const cfg = brand?.email;
+  return {
+    brandId: brand?.id ?? null,
+    brandName: brand?.name ?? null,
+    fromName: cfg?.fromName || brand?.name || undefined,
+    // The address mail is actually sent from: the brand's own connected Gmail if
+    // it has one, otherwise whatever account it currently operates through.
+    fromEmail: conn?.connected ? conn.email : (cfg?.connectedEmail || conn?.effectiveEmail || null),
+    usingBrandAccount: !!conn?.connected,
+    // Which account the OS effectively sends through today: brand | parent | legacy | none.
+    effective: conn?.effective ?? "none",
+    primaryFallback: !conn?.connected,
+    signature: cfg?.signature || "",
+    templates: cfg?.templates || [],
+  };
 }
 
 export async function resolveBrandCalendar(brandId?: string | null) {
-  return read((db) => {
-    const brand = (db.brands || []).find((b) => b.id === brandId) || null;
-    return {
-      brandId: brand?.id ?? null,
-      brandName: brand?.name ?? null,
-      calendarId: brand?.calendar?.calendarId || "primary",
-      usingBrandCalendar: !!brand?.calendar?.calendarId,
-      eventTypes: brand?.calendar?.eventTypes || [],
-    };
-  });
+  const brand = await read((db) => (db.brands || []).find((b) => b.id === brandId) || null);
+  const conn = (await listBrandConnections()).find((c) => c.brandId === brandId) || null;
+  return {
+    brandId: brand?.id ?? null,
+    brandName: brand?.name ?? null,
+    // With a brand's own account connected, "primary" is that account's calendar.
+    calendarId: brand?.calendar?.calendarId || "primary",
+    usingBrandCalendar: !!conn?.connected || !!brand?.calendar?.calendarId,
+    effective: conn?.effective ?? "none",
+    eventTypes: brand?.calendar?.eventTypes || [],
+  };
 }
 
 const fill = (s: string, vars: Record<string, string>) =>

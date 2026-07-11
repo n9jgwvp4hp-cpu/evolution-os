@@ -47,8 +47,9 @@ export function isGoogleConfigured() {
   return Boolean(clientId && clientSecret);
 }
 
-/** Build the Google consent-screen URL. */
-export function buildAuthUrl(): string {
+/** Build the Google consent-screen URL. An optional `state` round-trips back to
+ *  the callback (used to carry the target brandId for per-brand connections). */
+export function buildAuthUrl(state?: string): string {
   const { clientId, redirectUri } = googleConfig();
   const params = new URLSearchParams({
     client_id: clientId,
@@ -59,6 +60,7 @@ export function buildAuthUrl(): string {
     prompt: "consent",
     include_granted_scopes: "true",
   });
+  if (state) params.set("state", state);
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }
 

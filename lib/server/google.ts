@@ -29,7 +29,9 @@ export async function isGoogleConnectedServer(): Promise<boolean> {
   return Boolean(await readGoogleTokens());
 }
 
-async function refresh(tokens: GoogleTokens): Promise<GoogleTokens> {
+/** Refresh + return new tokens (does NOT persist). Exported so the per-brand
+ *  token store can reuse the exact same refresh logic. */
+export async function refreshGoogleTokens(tokens: GoogleTokens): Promise<GoogleTokens> {
   const { clientId, clientSecret } = cfg();
   if (!tokens.refresh_token) throw new Error("No refresh token; reconnect Google.");
   const res = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
@@ -50,13 +52,32 @@ async function refresh(tokens: GoogleTokens): Promise<GoogleTokens> {
     expiry: Date.now() + (data.expires_in ?? 3600) * 1000,
   };
 }
+const refresh = refreshGoogleTokens;
 
 // Single-flight: concurrent missions hitting an expired token share ONE refresh
 // instead of each POSTing to Google (redundant, and racy on the token write).
 let refreshInFlight: Promise<GoogleTokens> | null = null;
 
-/** Valid access token for headless use, refreshing + persisting as needed. */
+/**
+ * Valid access token for headless use, refreshing + persisting as needed.
+ *
+ * BRAND-AWARE: if the current execution is running inside a mission for a brand
+ * (AsyncLocalStorage), the token is resolved for that brand's own Google account
+ * — falling back to the parent (UW Equity) and then the legacy/primary token.
+ * Outside a mission (event engine, health checks) it uses the legacy token.
+ */
 export async function getServerAccessToken(): Promise<string> {
+  const { getMissionContext } = await import("@/lib/server/missionContext");
+  const brandId = getMissionContext()?.brandId;
+  if (brandId) {
+    const { getBrandAccessToken } = await import("@/lib/server/brandGoogle");
+    return getBrandAccessToken(brandId);
+  }
+  return getLegacyAccessToken();
+}
+
+/** The original single-account token path (legacy/primary connection). */
+export async function getLegacyAccessToken(): Promise<string> {
   const tokens = await readGoogleTokens();
   if (!tokens) throw new Error("Google is not connected.");
   if (Date.now() <= tokens.expiry - 60_000) return tokens.access_token;
