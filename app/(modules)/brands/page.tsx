@@ -11,13 +11,17 @@ import type { Brand, OnboardingForm } from "@/lib/types";
  * sources), and see each brand's onboarding form link. Architecture-first — the
  * fields map 1:1 to the Brand model.
  */
+type Conn = { brandId: string; connected: boolean; email: string | null; effective: string; effectiveEmail: string | null };
+
 export default function BrandsPage() {
   const { brands, reload, setActiveBrandId } = useBrand();
   const [forms, setForms] = useState<OnboardingForm[]>([]);
+  const [conns, setConns] = useState<Conn[]>([]);
   const [newName, setNewName] = useState("");
 
   const loadForms = () => fetch("/api/onboarding", { cache: "no-store" }).then((r) => r.json()).then((d) => setForms(d.forms || []));
-  useEffect(() => { loadForms(); }, []);
+  const loadConns = () => fetch("/api/brands/connections", { cache: "no-store" }).then((r) => r.json()).then((d) => setConns(d.connections || []));
+  useEffect(() => { loadForms(); loadConns(); }, []);
 
   async function createBrand(e: React.FormEvent) {
     e.preventDefault();
@@ -28,28 +32,41 @@ export default function BrandsPage() {
     await loadForms();
   }
 
+  const rank = (b: Brand) => (b.kind === "holding" ? 0 : b.kind === "personal" ? 2 : 1);
+
   return (
     <div className="max-w-5xl mx-auto pb-16">
-      <PageHeader title="Brands" subtitle="Your multi-brand portfolio — UW Equity + subsidiaries" />
+      <PageHeader title="Brand Settings" subtitle="Account types, profiles, and each brand's own Gmail + Calendar connection" />
 
       <form onSubmit={createBrand} className="glass p-4 mb-6 flex gap-3">
-        <input className="input flex-1" placeholder="New subsidiary name (e.g. Prism44)" value={newName} onChange={(e) => setNewName(e.target.value)} />
+        <input className="input flex-1" placeholder="New business brand name (e.g. Prism44)" value={newName} onChange={(e) => setNewName(e.target.value)} />
         <button className="btn-primary" type="submit">+ Add brand</button>
       </form>
 
       <div className="grid gap-4">
-        {[...brands].sort((a, b) => Number(b.isParent) - Number(a.isParent)).map((b) => (
-          <BrandCard key={b.id} brand={b} forms={forms.filter((f) => f.brandId === b.id)} onSaved={() => { reload(); loadForms(); }} onFocus={() => setActiveBrandId(b.id)} />
+        {[...brands].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)).map((b) => (
+          <BrandCard key={b.id} brand={b} conn={conns.find((c) => c.brandId === b.id)} forms={forms.filter((f) => f.brandId === b.id)} onSaved={() => { reload(); loadForms(); loadConns(); }} onFocus={() => setActiveBrandId(b.id)} />
         ))}
       </div>
     </div>
   );
 }
 
-function BrandCard({ brand, forms, onSaved, onFocus }: { brand: Brand; forms: OnboardingForm[]; onSaved: () => void; onFocus: () => void }) {
+const KIND_BADGE: Record<string, { label: string; cls: string }> = {
+  personal: { label: "Personal", cls: "bg-slate-500/20 text-slate-300" },
+  holding: { label: "Parent · Portfolio", cls: "bg-accent/20 text-accent" },
+  brand: { label: "Business Brand", cls: "bg-violet-500/20 text-violet-300" },
+};
+
+function BrandCard({ brand, conn, forms, onSaved, onFocus }: { brand: Brand; conn?: Conn; forms: OnboardingForm[]; onSaved: () => void; onFocus: () => void }) {
   const [edit, setEdit] = useState(false);
   const [draft, setDraft] = useState<Brand>(brand);
   useEffect(() => setDraft(brand), [brand]);
+
+  async function disconnect() {
+    await fetch(`/api/google/disconnect?brandId=${brand.id}`, { method: "POST" });
+    onSaved();
+  }
 
   async function save() {
     await fetch(`/api/brands/${brand.id}`, {
@@ -82,12 +99,33 @@ function BrandCard({ brand, forms, onSaved, onFocus }: { brand: Brand; forms: On
       <div className="flex items-center gap-2.5">
         <span className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: brand.colors?.primary }} />
         <h3 className="font-semibold text-white">{brand.name}</h3>
-        {brand.isParent && <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/20 text-accent uppercase tracking-wide">Parent</span>}
+        <span className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wide ${(KIND_BADGE[brand.kind] || KIND_BADGE.brand).cls}`}>{(KIND_BADGE[brand.kind] || KIND_BADGE.brand).label}</span>
         <span className="ml-auto flex gap-2">
           <button onClick={onFocus} className="text-xs text-slate-400 hover:text-white">Focus</button>
           <button onClick={() => setEdit((v) => !v)} className="text-xs text-slate-400 hover:text-white">{edit ? "Cancel" : "Edit"}</button>
-          {!brand.isParent && <button onClick={del} className="text-xs text-pink-400/80 hover:text-pink-400">Delete</button>}
+          {brand.kind === "brand" && <button onClick={del} className="text-xs text-pink-400/80 hover:text-pink-400">Delete</button>}
         </span>
+      </div>
+
+      {/* Gmail + Calendar connection (each brand connects its own, later). */}
+      <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.02] p-3">
+        <div className="flex items-center gap-2">
+          <span className={`w-2.5 h-2.5 rounded-full ${conn?.connected ? "bg-emerald-400" : conn?.effective === "parent" ? "bg-amber-400/70" : "bg-slate-600"}`} />
+          <span className="text-sm text-slate-200">Gmail + Calendar</span>
+          <span className="text-xs text-slate-500 ml-1">
+            {conn?.connected
+              ? `Connected as ${conn.email || "its own account"}`
+              : brand.kind === "personal"
+                ? (conn?.effective === "brand" ? "" : "Not connected — personal account, kept separate from business")
+                : conn?.effective === "parent"
+                  ? `Using UW Equity (${conn.effectiveEmail || "portfolio"}) until connected`
+                  : "Not connected"}
+          </span>
+          <span className="ml-auto flex gap-2">
+            <a href={`/api/google/auth?brandId=${brand.id}`} className="text-xs btn-primary py-1 px-2.5">{conn?.connected ? "Reconnect" : "Connect"}</a>
+            {conn?.connected && <button onClick={disconnect} className="text-xs text-slate-400 hover:text-white">Disconnect</button>}
+          </span>
+        </div>
       </div>
 
       {!edit ? (

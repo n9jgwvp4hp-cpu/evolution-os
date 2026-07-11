@@ -55,12 +55,13 @@ function seedBrands(): Brand[] {
   const mk = (
     id: string,
     name: string,
+    kind: Brand["kind"],
     parent: string | null,
     isParent: boolean,
     colors: BrandColors,
     services: string[],
   ): Brand => ({
-    id, name, slug: slugify(name), parentId: parent, isParent,
+    id, name, slug: slugify(name), kind, parentId: parent, isParent,
     domain: "", website: "", logo: name.split(/\s+/).map((w) => w[0]).join("").slice(0, 3).toUpperCase(),
     instagramAccounts: [], emailAccounts: [], services,
     colors, leadSources: [...DEFAULT_LEAD_SOURCES], status: "active",
@@ -71,9 +72,11 @@ function seedBrands(): Brand[] {
     createdAt: now, updatedAt: now,
   });
   return [
-    mk(parentId, "UW Equity", null, true, { primary: "#6366f1", secondary: "#0ea5e9", accent: "#22d3ee" }, ["Holding company", "Capital allocation", "Portfolio operations"]),
-    mk(uid(), "Prism44", parentId, false, { primary: "#a855f7", secondary: "#ec4899", accent: "#f472b6" }, ["Content", "Branding", "Production"]),
-    mk(uid(), "Quality Management", parentId, false, { primary: "#10b981", secondary: "#14b8a6", accent: "#34d399" }, ["Property services", "Inspections", "Maintenance"]),
+    // Personal is a separate, isolated account — never used for business operations.
+    mk(uid(), "Personal", "personal", null, false, { primary: "#64748b", secondary: "#475569", accent: "#94a3b8" }, ["Personal"]),
+    mk(parentId, "UW Equity", "holding", null, true, { primary: "#6366f1", secondary: "#0ea5e9", accent: "#22d3ee" }, ["Holding company", "Capital allocation", "Portfolio operations"]),
+    mk(uid(), "Prism44", "brand", parentId, false, { primary: "#a855f7", secondary: "#ec4899", accent: "#f472b6" }, ["Content", "Branding", "Production"]),
+    mk(uid(), "Quality Management", "brand", parentId, false, { primary: "#10b981", secondary: "#14b8a6", accent: "#34d399" }, ["Property services", "Inspections", "Maintenance"]),
   ];
 }
 
@@ -139,8 +142,8 @@ export async function ensureBrandsSeeded(): Promise<void> {
       if ((db.brands || []).length) return; // double-checked under the write lock
       const brands = seedBrands();
       db.brands = brands;
-      // Every brand (including the parent) gets its example onboarding form.
-      db.onboardingForms = [...(db.onboardingForms || []), ...brands.map((b) => exampleForm(b.id, b.name))];
+      // Business brands get an example onboarding form; the Personal account does not.
+      db.onboardingForms = [...(db.onboardingForms || []), ...brands.filter((b) => b.kind !== "personal").map((b) => exampleForm(b.id, b.name))];
       const parent = brands.find((b) => b.isParent) || brands[0];
       db.settings = { ...(db.settings || { activeBrandId: null }), activeBrandId: parent.id };
     });
@@ -161,7 +164,8 @@ async function ensureBrandsUpgraded(): Promise<void> {
 
   const needsWork = await read((db) => {
     const brands = db.brands || [];
-    if (brands.some((b) => !b.pipelineStages || !b.email || !b.calendar || !b.notifications)) return true;
+    if (brands.some((b) => !b.pipelineStages || !b.email || !b.calendar || !b.notifications || !b.kind)) return true;
+    if (!brands.some((b) => b.kind === "personal")) return true; // Personal account not seeded yet
     // A known brand still carrying the OLD generic default form gets it swapped for the rich example.
     return brands.some((b) => KNOWN_BRANDS.includes(b.name) && hasGeneric(db.onboardingForms || [], b.id, b.name));
   });
@@ -174,6 +178,24 @@ async function ensureBrandsUpgraded(): Promise<void> {
       if (!b.calendar) b.calendar = defaultCalendarConfig(b.name);
       if (!b.notifications) b.notifications = defaultNotifications();
       if (b.website === undefined) b.website = "";
+      // Backfill account type: the parent holding company vs. a business subsidiary.
+      if (!b.kind) b.kind = b.isParent ? "holding" : "brand";
+    }
+    // Seed the separate Personal account if it doesn't exist yet.
+    if (!(db.brands || []).some((b) => b.kind === "personal")) {
+      const now = Date.now();
+      db.brands = [
+        {
+          id: uid(), name: "Personal", slug: "personal", kind: "personal", parentId: null, isParent: false,
+          domain: "", website: "", logo: "P", instagramAccounts: [], emailAccounts: [], services: ["Personal"],
+          colors: { primary: "#64748b", secondary: "#475569", accent: "#94a3b8" },
+          leadSources: [...DEFAULT_LEAD_SOURCES], status: "active",
+          pipelineStages: [...DEFAULT_PIPELINE_STAGES], email: defaultEmailConfig("Personal"),
+          calendar: defaultCalendarConfig("Personal"), notifications: defaultNotifications(),
+          createdAt: now, updatedAt: now,
+        },
+        ...(db.brands || []),
+      ];
     }
     // Swap the stale auto-seeded generic intake form for the rich brand-specific
     // example (safe — those were defaults, not user-authored). Deterministic by title.
@@ -207,6 +229,7 @@ export async function createBrand(input: Partial<Brand>): Promise<Brand> {
       id: uid(),
       name: String(input.name || "Untitled Brand").slice(0, 120),
       slug: slugify(String(input.name || uid())),
+      kind: "brand", // future companies are business subsidiaries
       // New brands default to subsidiaries of the parent holding company.
       parentId: input.parentId !== undefined ? input.parentId : parent?.id ?? null,
       isParent: false,

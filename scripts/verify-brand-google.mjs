@@ -33,7 +33,10 @@ const skip = (n) => { skipped++; console.log(`  ⦸ ${n} (test hook disabled)`);
   const uw = brands.find((b) => b.name === "UW Equity");
   const prism = brands.find((b) => b.name === "Prism44");
   const quality = brands.find((b) => b.name === "Quality Management");
+  const personal = brands.find((b) => b.kind === "personal");
   check("setup: portfolio present", !!uw && !!prism && !!quality);
+  check("setup: Personal account exists and is a separate type", !!personal && personal.kind === "personal" && personal.isParent === false && personal.parentId === null);
+  check("setup: account types assigned (holding / brand)", uw?.kind === "holding" && prism?.kind === "brand" && quality?.kind === "brand");
 
   // ---- Connections API lists every brand with its own status ----
   const conn = await rf("/api/brands/connections");
@@ -62,42 +65,46 @@ const skip = (n) => { skipped++; console.log(`  ⦸ ${n} (test hook disabled)`);
   const hookOn = hookProbe.status !== 404;
 
   if (!hookOn) {
-    skip("token routing: brand → parent → legacy");
+    skip("token routing + personal/business isolation");
     skip("identity auto-selects the brand account");
   } else {
-    // clean slate
-    for (const b of [uw, prism, quality]) await rf("/api/dev/brand-token", { method: "POST", body: JSON.stringify({ brandId: b.id, clear: true }) });
+    const resolve = async (b) => (await rf(`/api/dev/brand-token?resolve=${b.id}`)).json;
+    const clearAll = async () => { for (const b of [uw, prism, quality, personal]) await rf("/api/dev/brand-token", { method: "POST", body: JSON.stringify({ brandId: b.id, clear: true }) }); };
+    await clearAll();
 
-    // 1. Connect ONLY the parent → a subsidiary resolves to the parent (portfolio fallback).
+    // ---- PERSONAL / BUSINESS ISOLATION (the core requirement) ----
+    // Connect ONLY the Personal account. A business brand must NOT be able to use it.
+    await rf("/api/dev/brand-token", { method: "POST", body: JSON.stringify({ brandId: personal.id, email: "me@personal.com" }) });
+    const rPersonal = await resolve(personal);
+    check("isolation: personal account resolves to its OWN token", rPersonal.token === `test-token-${personal.id}`);
+    const rBizNoLeak = await resolve(prism);
+    check("isolation: business brand does NOT borrow the personal account", rBizNoLeak.ok === false, JSON.stringify(rBizNoLeak));
+    const rUwNoLeak = await resolve(uw);
+    check("isolation: the holding company does NOT borrow the personal account", rUwNoLeak.ok === false);
+    const connP = (await rf("/api/brands/connections")).json.connections.find((c) => c.brandId === personal.id);
+    check("connections: personal shows its own connection, never 'parent'", connP?.connected === true && connP?.effective === "brand");
+
+    // ---- BUSINESS ROUTING: own → holding (UW Equity) → none ----
     await rf("/api/dev/brand-token", { method: "POST", body: JSON.stringify({ brandId: uw.id, email: "portfolio@uwequity.com" }) });
-    const rPrismViaParent = await rf(`/api/dev/brand-token?resolve=${prism.id}`);
-    check("routing: subsidiary falls back to the parent (UW Equity) account", rPrismViaParent.json?.token === `test-token-${uw.id}`, rPrismViaParent.json?.token);
+    const rPrismViaParent = await resolve(prism);
+    check("routing: business brand falls back to UW Equity (holding)", rPrismViaParent.token === `test-token-${uw.id}`);
     const connParent = (await rf("/api/brands/connections")).json.connections.find((c) => c.brandId === prism.id);
-    check("connections: subsidiary shows it operates through the parent", connParent?.connected === false && connParent?.effective === "parent" && connParent?.effectiveEmail === "portfolio@uwequity.com");
+    check("connections: business brand shows it operates through UW Equity", connParent?.effective === "parent" && connParent?.effectiveEmail === "portfolio@uwequity.com");
 
-    // 2. Connect the subsidiary's OWN account → it switches to its own token.
     await rf("/api/dev/brand-token", { method: "POST", body: JSON.stringify({ brandId: prism.id, email: "hello@prism44.com" }) });
-    const rPrismOwn = await rf(`/api/dev/brand-token?resolve=${prism.id}`);
-    check("routing: connected subsidiary uses its OWN account", rPrismOwn.json?.token === `test-token-${prism.id}`);
-    const connOwn = (await rf("/api/brands/connections")).json.connections.find((c) => c.brandId === prism.id);
-    check("connections: subsidiary now shows its own connection", connOwn?.connected === true && connOwn?.email === "hello@prism44.com" && connOwn?.effective === "brand");
-
-    // 3. Identity auto-selection reflects the real connection.
+    check("routing: connected business brand uses its OWN account", (await resolve(prism)).token === `test-token-${prism.id}`);
     const ident = (await rf(`/api/brands/${prism.id}/identity`)).json;
-    check("identity: brand email identity auto-selects the connected account", ident.email?.usingBrandAccount === true && ident.email?.fromEmail === "hello@prism44.com" && ident.email?.effective === "brand");
-    check("identity: brand calendar auto-selects the connected account", ident.calendar?.usingBrandCalendar === true && ident.calendar?.effective === "brand");
+    check("identity: brand email + calendar auto-select the connected account", ident.email?.usingBrandAccount === true && ident.email?.fromEmail === "hello@prism44.com" && ident.calendar?.usingBrandCalendar === true);
 
-    // 4. Tokens are stored SEPARATELY: quality (unconnected) still falls back to parent, not prism.
-    const rQuality = await rf(`/api/dev/brand-token?resolve=${quality.id}`);
-    check("storage: brands are isolated (quality → parent, not another subsidiary)", rQuality.json?.token === `test-token-${uw.id}`);
-
-    // 5. Disconnect the subsidiary → it reverts to the parent fallback.
+    // Disconnect the brand → reverts to UW Equity (NOT personal).
     await rf(`/api/google/disconnect?brandId=${prism.id}`, { method: "POST" });
-    const rAfter = await rf(`/api/dev/brand-token?resolve=${prism.id}`);
-    check("disconnect: brand reverts to the portfolio account", rAfter.json?.token === `test-token-${uw.id}`);
+    check("disconnect: business brand reverts to UW Equity, never personal", (await resolve(prism)).token === `test-token-${uw.id}`);
 
-    // cleanup injected tokens
-    for (const b of [uw, prism, quality]) await rf("/api/dev/brand-token", { method: "POST", body: JSON.stringify({ brandId: b.id, clear: true }) });
+    // Disconnect UW Equity → business brand has NO account (never personal).
+    await rf(`/api/google/disconnect?brandId=${uw.id}`, { method: "POST" });
+    check("isolation: with no business connection, brand resolves to NONE (not personal)", (await resolve(prism)).ok === false);
+
+    await clearAll();
     console.log("  · cleaned up injected test tokens");
   }
 

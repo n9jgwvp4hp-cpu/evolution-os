@@ -216,6 +216,7 @@ export async function planObjective(objectiveId: string, opts: { force?: boolean
     const priority = objWeight * 2 + (highestValue ? 12 : immediate ? 4 : 0);
     const m = await createMission(text, {
       objectiveId,
+      brandId: objective.brandId ?? null, // missions inherit the objective's brand
       priority,
       scheduledFor: immediate ? undefined : Date.now() + 30 * 60_000,
     });

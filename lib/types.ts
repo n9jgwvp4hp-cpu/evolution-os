@@ -39,10 +39,16 @@ export type BrandColors = {
   accent?: string;
 };
 
+/** Account type. `personal` is a fully separate, non-business account (never used
+ *  for business operations); `holding` is the parent company (UW Equity);
+ *  `brand` is a business subsidiary. */
+export type BrandKindType = "personal" | "holding" | "brand";
+
 export type Brand = {
   id: string;
-  name: string;                 // "UW Equity", "Prism44", "Quality Management"
+  name: string;                 // "Personal", "UW Equity", "Prism44", "Quality Management"
   slug: string;                 // "uw-equity", "prism44"
+  kind: BrandKindType;          // account type — governs isolation + portfolio rollup
   parentId: string | null;      // subsidiaries point to the parent; the parent's is null
   isParent: boolean;            // true only for UW Equity (the holding company)
   domain?: string;
@@ -108,6 +114,7 @@ export type BrandNotificationSettings = {
 /** App-wide UI/runtime settings (single-user OS). */
 export type AppSettings = {
   activeBrandId: string | null; // the brand currently in focus (drives the switcher + scoped views)
+  personalMigrationDone?: boolean; // one-time: connected personal account moved to the Personal brand
 };
 
 export type OnboardingFieldType =

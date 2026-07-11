@@ -20,7 +20,7 @@ const MODULES: Item[] = [
   { href: "/activity", label: "Activity", hint: "What ran while away", icon: <IconPulse /> },
   { href: "/approvals", label: "Approvals", hint: "Decisions for you", icon: <IconCheck /> },
   { href: "/leads", label: "Lead Pipeline", hint: "Brand CRM stages", icon: <IconLayers /> },
-  { href: "/brands", label: "Brands", hint: "Manage the portfolio", icon: <IconTag /> },
+  { href: "/brands", label: "Brand Settings", hint: "Accounts + connections", icon: <IconTag /> },
   { href: "/onboarding", label: "Onboarding", hint: "Form builder", icon: <IconNote /> },
   { href: "/templates", label: "Templates", hint: "Mission playbooks", icon: <IconBolt /> },
   { href: "/dashboard", label: "Overview", hint: "Everything at a glance", icon: <IconGrid /> },

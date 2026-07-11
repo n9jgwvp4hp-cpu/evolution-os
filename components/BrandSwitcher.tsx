@@ -14,8 +14,11 @@ export default function BrandSwitcher() {
   const [open, setOpen] = useState(false);
   if (!loaded || brands.length === 0) return null;
 
-  const ordered = [...brands].sort((a, b) => Number(b.isParent) - Number(a.isParent) || a.name.localeCompare(b.name));
+  // Order: holding company → business brands → Personal (kept visually separate).
+  const rank = (b: any) => (b.kind === "holding" ? 0 : b.kind === "personal" ? 2 : 1);
+  const ordered = [...brands].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   const dot = activeBrand?.colors?.primary || "#6366f1";
+  const typeLabel = (k?: string) => (k === "holding" ? "Portfolio" : k === "personal" ? "Personal" : "Brand");
 
   return (
     <div className="relative">
@@ -26,7 +29,7 @@ export default function BrandSwitcher() {
       >
         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: dot }} />
         <span className="truncate font-medium">{activeBrand?.name || "Select brand"}</span>
-        {activeBrand?.isParent && <span className="text-[10px] text-slate-500 uppercase tracking-wide">Portfolio</span>}
+        {activeBrand && <span className="text-[10px] text-slate-500 uppercase tracking-wide">{typeLabel(activeBrand.kind)}</span>}
         <svg width="12" height="12" viewBox="0 0 24 24" className="text-slate-500 shrink-0"><path fill="currentColor" d="m7 10l5 5l5-5z" /></svg>
       </button>
 
@@ -34,23 +37,27 @@ export default function BrandSwitcher() {
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute z-50 mt-1 right-0 w-64 rounded-xl border border-white/10 bg-surface/95 backdrop-blur-2xl p-1.5 shadow-xl">
-            {ordered.map((b) => {
+            {ordered.map((b, i) => {
               const active = b.id === activeBrandId;
+              // Divider before the Personal account to reinforce the separation.
+              const showDivider = b.kind === "personal" && ordered[i - 1]?.kind !== "personal";
               return (
-                <button
-                  key={b.id}
-                  onClick={() => { setActiveBrandId(b.id); setOpen(false); }}
-                  className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition ${active ? "bg-white/10" : "hover:bg-white/5"}`}
-                >
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: b.colors?.primary || "#6366f1" }} />
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-sm text-slate-100 truncate">{b.name}</span>
-                    <span className="block text-[11px] text-slate-500 truncate">
-                      {b.isParent ? "Parent · portfolio roll-up" : (b.services?.[0] || "Subsidiary")}
+                <div key={b.id}>
+                  {showDivider && <div className="my-1 border-t border-white/10" />}
+                  <button
+                    onClick={() => { setActiveBrandId(b.id); setOpen(false); }}
+                    className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition ${active ? "bg-white/10" : "hover:bg-white/5"}`}
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: b.colors?.primary || "#6366f1" }} />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm text-slate-100 truncate">{b.name}</span>
+                      <span className="block text-[11px] text-slate-500 truncate">
+                        {b.kind === "holding" ? "Parent · portfolio roll-up" : b.kind === "personal" ? "Personal · separate from business" : (b.services?.[0] || "Business brand")}
+                      </span>
                     </span>
-                  </span>
-                  {active && <span className="text-accent text-xs">●</span>}
-                </button>
+                    {active && <span className="text-accent text-xs">●</span>}
+                  </button>
+                </div>
               );
             })}
           </div>

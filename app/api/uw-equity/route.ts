@@ -107,14 +107,16 @@ export async function GET() {
     };
   }
 
-  const perBrand = brands.map((b) => ({
-    id: b.id, name: b.name, slug: b.slug, isParent: b.isParent, status: b.status,
+  // The portfolio is BUSINESS only — the Personal account is never included.
+  const businessBrands = brands.filter((b) => b.kind !== "personal");
+  const perBrand = businessBrands.map((b) => ({
+    id: b.id, name: b.name, slug: b.slug, isParent: b.isParent, kind: b.kind, status: b.status,
     colors: b.colors, services: b.services, domain: b.domain,
     ...aggregateBrand(b.id),
   }));
 
-  // Portfolio roll-up across the subsidiaries (everything UW Equity owns).
-  const subs = perBrand.filter((b) => !b.isParent);
+  // Portfolio roll-up across the subsidiaries (business brands UW Equity owns).
+  const subs = perBrand.filter((b) => b.kind === "brand");
   const portfolioSources = emptySources();
   for (const b of subs) for (const s of LEAD_SOURCES) portfolioSources[s] += b.leads.bySource[s] || 0;
   const portfolio = {
