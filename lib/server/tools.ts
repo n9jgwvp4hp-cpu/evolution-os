@@ -313,6 +313,9 @@ export const SERVER_TOOLS: ServerTool[] = [
     name: "create_calendar_event",
     description:
       "Create an event on the user's connected Google Calendar. The objective is your authorization.",
+    // Booking a meeting is an external, outward commitment — gate it for approval
+    // (per the approval policy: external meetings must be approved before booking).
+    requiresApproval: true,
     parameters: obj(
       {
         summary: str("Event title"),
