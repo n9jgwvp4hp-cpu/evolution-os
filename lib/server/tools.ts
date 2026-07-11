@@ -155,10 +155,16 @@ export const SERVER_TOOLS: ServerTool[] = [
     parameters: obj({ query: str("The search query"), count: num("How many results, default 8, max 15") }, ["query"]),
     summarize: (a) => `Search web: “${a.query}”`,
     async execute(a) {
-      const { searchWeb, searchProvider } = await import("@/lib/server/search");
+      const { runSearch } = await import("@/lib/server/search");
       try {
-        const results = await searchWeb(String(a.query), Math.min(Number(a.count) || 8, 15));
-        return { ok: true, provider: searchProvider(), query: a.query, count: results.length, results };
+        const out = await runSearch(String(a.query), Math.min(Number(a.count) || 8, 15));
+        return {
+          ok: true, provider: out.provider, degraded: out.degraded, query: a.query,
+          count: out.results.length, results: out.results,
+          note: out.results.length === 0
+            ? `No results (provider: ${out.provider}${out.degraded ? ", degraded" : ""}${out.error ? ", " + out.error : ""}). If this persists, set BRAVE_SEARCH_API_KEY.`
+            : undefined,
+        };
       } catch (e: any) {
         return { ok: false, error: e?.message || "Web search failed." };
       }

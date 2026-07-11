@@ -3,6 +3,7 @@ import { read, getWorkerHeartbeat, dbBackend } from "@/lib/server/db";
 import { listMissionViews } from "@/lib/server/missionStore";
 import { startWorker } from "@/lib/server/missionEngine";
 import { listActivity } from "@/lib/server/activity";
+import { searchStatus } from "@/lib/server/search";
 import { fetchWithTimeout } from "@/lib/server/http";
 import type { MissionView } from "@/lib/missionTypes";
 
@@ -192,6 +193,7 @@ export async function GET() {
       calendar: { status: googleStatus, detail: googleDetail },
       crm: { status: "ok", detail: `${brain.contacts.length} contacts · ${brain.deals.length} deals` },
       ai: { status: aiOk ? "ok" : "down", detail: aiOk ? "OpenAI configured" : "no API key" },
+      search: (() => { const s = searchStatus(); return { status: s.configured ? "ok" : "degraded", detail: s.configured ? `${s.provider} configured` : "no key — DuckDuckGo fallback (often blocked)" }; })(),
     },
     hierarchy,
     kernel,

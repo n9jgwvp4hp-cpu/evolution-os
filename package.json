@@ -31,7 +31,8 @@
     "verify:multibrand": "node scripts/verify-multibrand.mjs",
     "verify:phase2": "node scripts/verify-phase2.mjs",
     "verify:brandgoogle": "node scripts/verify-brand-google.mjs",
-    "verify:automissions": "node scripts/verify-autonomous-missions.mjs"
+    "verify:automissions": "node scripts/verify-autonomous-missions.mjs",
+    "verify:search": "node scripts/verify-search.mjs"
   },
   "engines": {
     "node": ">=20 <23"
