@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { Pool, type PoolClient } from "pg";
-import type { Task, Contact, Deal, Note, Memory, Priority, OrchestratorStatus, AutomationRule, TriggerEvent, Identity, Vision, Objective, Brand, AppSettings, OnboardingForm, FormSubmission, Project } from "@/lib/types";
+import type { Task, Contact, Deal, Note, Memory, Priority, OrchestratorStatus, AutomationRule, TriggerEvent, Identity, Vision, Objective, Brand, AppSettings, OnboardingForm, FormSubmission, Project, MissionTemplate, Activity, Approval } from "@/lib/types";
 
 /**
  * Evolution OS persistence — the server's durable source of truth.
@@ -35,6 +35,9 @@ export type Shape = {
   settings: AppSettings | null; // app-wide UI settings (active brand, …)
   onboardingForms: OnboardingForm[]; // brand-specific onboarding forms
   formSubmissions: FormSubmission[]; // onboarding submissions (bounded) → become leads
+  missionTemplates: MissionTemplate[]; // per-brand mission templates (auto-instantiated on lead intake)
+  activityLog: Activity[]; // global activity feed (bounded)
+  approvals: Approval[]; // approval queue (non-mission approvals; mission approvals aggregated in)
   identity: Identity | null; // who the user is + what they value (singleton)
   visions: Vision[];         // long-term futures being built
   objectives: Objective[];   // measurable outcomes supporting the visions
@@ -57,6 +60,9 @@ const empty: Shape = {
   settings: null,
   onboardingForms: [],
   formSubmissions: [],
+  missionTemplates: [],
+  activityLog: [],
+  approvals: [],
   identity: null,
   visions: [],
   objectives: [],

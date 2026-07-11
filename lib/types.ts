@@ -21,8 +21,17 @@ export type Project = {
  * ========================================================================= */
 
 /** How a lead found a brand. Configurable per brand; these are the defaults. */
-export type LeadSource = "website" | "instagram" | "referral" | "ads" | "direct" | "other";
-export const LEAD_SOURCES: LeadSource[] = ["website", "instagram", "referral", "ads", "direct", "other"];
+export type LeadSource = "website" | "instagram" | "referral" | "ads" | "email" | "manual" | "direct" | "other";
+export const LEAD_SOURCES: LeadSource[] = ["website", "instagram", "referral", "ads", "email", "manual", "direct", "other"];
+
+/** Full lead-origin attribution — the who/where/when a lead came from. */
+export type LeadAttribution = {
+  brandId: string | null;
+  source: LeadSource;
+  campaign?: string;   // e.g. "spring-ig-launch", "google-ads-brand"
+  channel?: string;    // e.g. specific IG handle, ad group, referrer name
+  timestamp: number;
+};
 
 export type BrandColors = {
   primary: string;    // brand primary (hex)
@@ -37,6 +46,7 @@ export type Brand = {
   parentId: string | null;      // subsidiaries point to the parent; the parent's is null
   isParent: boolean;            // true only for UW Equity (the holding company)
   domain?: string;
+  website?: string;             // public site URL (may differ from bare domain)
   logo?: string;                // URL or short initials/emoji (no asset pipeline yet)
   instagramAccounts: string[];
   emailAccounts: string[];
@@ -44,8 +54,55 @@ export type Brand = {
   colors: BrandColors;
   leadSources: LeadSource[];    // which sources are enabled for this brand
   status: "active" | "paused" | "archived";
+  // ---- operational config (Phase 2) ----
+  pipelineStages?: PipelineStage[];        // this brand's editable CRM pipeline
+  email?: BrandEmailConfig;                // brand Gmail identity + templates + signature
+  calendar?: BrandCalendarConfig;          // brand calendar selection + event types
+  notifications?: BrandNotificationSettings;
   createdAt: number;
   updatedAt: number;
+};
+
+/** One stage in a brand's editable CRM pipeline. */
+export type PipelineStage = { key: string; label: string };
+
+/** Default pipeline for a new brand (requirement #2). */
+export const DEFAULT_PIPELINE_STAGES: PipelineStage[] = [
+  { key: "new_lead", label: "New Lead" },
+  { key: "qualified", label: "Qualified" },
+  { key: "proposal_sent", label: "Proposal Sent" },
+  { key: "negotiation", label: "Negotiation" },
+  { key: "active_client", label: "Active Client" },
+  { key: "completed", label: "Completed" },
+];
+
+export type EmailTemplate = {
+  id: string;
+  name: string;      // "Lead welcome", "Proposal follow-up"
+  subject: string;
+  body: string;      // may contain {{name}}, {{brand}} tokens
+};
+
+/** Brand email identity. `connectedEmail` is the Gmail address whose OAuth the
+ *  brand sends from (per-brand connection is the one credential step); until then
+ *  the OS falls back to the primary connected account but stamps this identity. */
+export type BrandEmailConfig = {
+  fromName?: string;           // display name on outbound mail
+  connectedEmail?: string;     // brand Gmail address (once its OAuth is connected)
+  signature?: string;
+  templates: EmailTemplate[];
+};
+
+export type BrandCalendarConfig = {
+  calendarId?: string;         // Google calendar id for this brand ("primary" fallback)
+  eventTypes?: string[];       // "Discovery call", "Property inspection", "Investor meeting", …
+};
+
+export type BrandNotificationSettings = {
+  newLead: boolean;
+  missionComplete: boolean;
+  blocker: boolean;
+  dailyDigest: boolean;
 };
 
 /** App-wide UI/runtime settings (single-user OS). */
@@ -53,17 +110,22 @@ export type AppSettings = {
   activeBrandId: string | null; // the brand currently in focus (drives the switcher + scoped views)
 };
 
-export type OnboardingFieldType = "text" | "email" | "phone" | "textarea" | "select" | "number";
+export type OnboardingFieldType =
+  | "text" | "email" | "phone" | "textarea" | "select"
+  | "multiselect" | "file" | "date" | "url" | "number";
 
 /** One field in a brand's onboarding form. `mapsTo` links the answer to a Contact
- *  field so a submission becomes a real CRM lead automatically. */
+ *  field so a submission becomes a real CRM lead automatically. `showIf` makes the
+ *  field conditional on another field's answer (no-code branching). */
 export type OnboardingField = {
   id: string;
   label: string;
   type: OnboardingFieldType;
   required: boolean;
-  options?: string[]; // for type "select"
-  mapsTo?: "name" | "email" | "phone" | "budget" | "notes" | "type";
+  options?: string[]; // for "select" / "multiselect"
+  placeholder?: string;
+  mapsTo?: "name" | "email" | "phone" | "budget" | "notes" | "type" | "company";
+  showIf?: { fieldId: string; equals: string }; // conditional display
 };
 
 export type OnboardingForm = {
@@ -83,8 +145,63 @@ export type FormSubmission = {
   brandId: string;
   data: Record<string, any>;
   leadSource: LeadSource;
+  campaign?: string;
   contactId: string | null; // the CRM lead this submission created
   createdAt: number;
+};
+
+/* ---- Mission templates (Phase 2 #3): configurable per brand; auto-instantiated
+ *      when a lead enters that brand's CRM. ---- */
+export type MissionTemplateStep = {
+  id: string;
+  objective: string;   // the mission objective text; supports {{lead}} / {{brand}} tokens
+  order: number;
+  offsetMinutes?: number; // schedule this step N minutes after intake (staggering)
+};
+export type MissionTemplate = {
+  id: string;
+  brandId: string;
+  name: string;
+  trigger: "lead_created" | "manual";
+  steps: MissionTemplateStep[];
+  status: "active" | "disabled";
+  createdAt: number;
+  updatedAt: number;
+};
+
+/* ---- Global activity feed (Phase 2 #6): the "what happened while I was away"
+ *      log. Append-only + bounded. ---- */
+export type ActivityKind =
+  | "mission_created" | "mission_completed" | "mission_failed"
+  | "email_sent" | "email_drafted" | "meeting_scheduled"
+  | "new_lead" | "revenue_change" | "pipeline_update"
+  | "approval_needed" | "brand_change" | "error" | "blocker";
+export type Activity = {
+  id: string;
+  brandId: string | null;
+  kind: ActivityKind;
+  title: string;
+  detail?: string;
+  refType?: string; // "mission" | "contact" | "deal" | "brand" | …
+  refId?: string;
+  createdAt: number;
+};
+
+/* ---- Approval queue (Phase 2 #7): the OS runs autonomously and only raises an
+ *      approval for money / contracts / external meetings / brand-setting changes /
+ *      missing info. Mission-gated approvals are surfaced alongside these. ---- */
+export type ApprovalReason = "money" | "contract" | "external_meeting" | "brand_setting" | "missing_info" | "other";
+export type Approval = {
+  id: string;
+  brandId: string | null;
+  reason: ApprovalReason;
+  title: string;
+  detail?: string;
+  action?: { type: string; payload?: any }; // what will run on approval
+  status: "pending" | "approved" | "declined";
+  missionId?: string | null; // if this approval gates a mission
+  createdAt: number;
+  resolvedAt?: number | null;
 };
 
 export type Note = {
@@ -131,8 +248,17 @@ export type Contact = {
   status: LeadStatus;
   source: string; // free-form origin note (kept for back-compat)
   leadSource?: LeadSource; // structured lead-source attribution (website/instagram/referral/ads/…)
+  campaign?: string; // marketing campaign / channel that produced this lead
   budget: number; // 0 = unknown
   notes: string;
+  // ---- brand CRM pipeline fields (Phase 2) ----
+  pipelineStage?: string;        // key into the brand's pipelineStages
+  owner?: string;                // who owns this lead
+  nextAction?: string;           // the next step for this lead
+  revenue?: number;              // realized/expected revenue attributed to this lead
+  attachedMissionIds?: string[]; // missions auto-generated / linked to this lead
+  lastContact?: number;          // last outreach timestamp
+  company?: string;              // company name (B2B brands)
   lastTouch: number;
   createdAt: number;
 };

@@ -64,6 +64,16 @@ export type {
   Deal,
   Memory,
   BrainKind,
+  Brand,
+  PipelineStage,
+  OnboardingForm,
+  OnboardingField,
+  OnboardingFieldType,
+  MissionTemplate,
+  MissionTemplateStep,
+  Activity,
+  Approval,
+  LeadSource,
 } from "@/lib/types";
 
 /** Format a number as USD with no cents. */

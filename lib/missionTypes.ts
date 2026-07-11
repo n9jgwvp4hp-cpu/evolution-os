@@ -50,6 +50,8 @@ export type Mission = {
   id: string;
   objective: string;
   objectiveId?: string | null; // the Objective this mission ladders up to (traceability)
+  brandId?: string | null;     // the Brand this mission serves (portfolio scoping)
+  contactId?: string | null;   // the CRM lead this mission was generated for (if any)
   priority?: number; // planner rank; higher = claimed sooner among due queued missions (default 0)
   status: MissionStatus;
   steps: MissionStep[];

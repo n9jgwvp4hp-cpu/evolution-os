@@ -17,7 +17,12 @@ type Item = { href: string; label: string; hint: string; icon: JSX.Element };
 const MODULES: Item[] = [
   { href: "/", label: "Assistant", hint: "Talk to Evolution OS", icon: <IconSpark /> },
   { href: "/uw-equity", label: "UW Equity", hint: "Portfolio dashboard", icon: <IconBuilding /> },
+  { href: "/activity", label: "Activity", hint: "What ran while away", icon: <IconPulse /> },
+  { href: "/approvals", label: "Approvals", hint: "Decisions for you", icon: <IconCheck /> },
+  { href: "/leads", label: "Lead Pipeline", hint: "Brand CRM stages", icon: <IconLayers /> },
   { href: "/brands", label: "Brands", hint: "Manage the portfolio", icon: <IconTag /> },
+  { href: "/onboarding", label: "Onboarding", hint: "Form builder", icon: <IconNote /> },
+  { href: "/templates", label: "Templates", hint: "Mission playbooks", icon: <IconBolt /> },
   { href: "/dashboard", label: "Overview", hint: "Everything at a glance", icon: <IconGrid /> },
   { href: "/ops", label: "Command Center", hint: "Live operations", icon: <IconPulse /> },
   { href: "/automations", label: "Automations", hint: "Event-driven rules", icon: <IconBolt /> },

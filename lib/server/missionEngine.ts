@@ -84,13 +84,15 @@ async function logStatus(id: string, label: string, detail?: string) {
 
 export async function createMission(
   objective: string,
-  opts: { scheduledFor?: number; recurrence?: { everyMs: number }; trigger?: { rule: string; event: string }; objectiveId?: string | null; priority?: number } = {}
+  opts: { scheduledFor?: number; recurrence?: { everyMs: number }; trigger?: { rule: string; event: string }; objectiveId?: string | null; priority?: number; brandId?: string | null; contactId?: string | null } = {}
 ): Promise<Mission> {
   const scheduled = opts.scheduledFor && opts.scheduledFor > Date.now() ? opts.scheduledFor : undefined;
   const m: Mission = {
     id: uid(),
     objective,
     objectiveId: opts.objectiveId ?? null,
+    brandId: opts.brandId ?? null,
+    contactId: opts.contactId ?? null,
     priority: Math.round(Number(opts.priority) || 0),
     status: "queued",
     steps: [
@@ -331,6 +333,9 @@ async function processCalls(id: string, calls: any[]): Promise<boolean> {
       await patch(id, { status: "needs_approval", pending });
       await addStep(id, { kind: "progress", text: "Waiting for your approval", detail: tool.summarize(parseArgs(call)) });
       await logStatus(id, "Waiting", "approval required");
+      // Surface it in the unified approval queue + activity feed.
+      const mForApproval = await getMission(id);
+      if (mForApproval) import("@/lib/server/missionHooks").then((h) => h.onMissionNeedsApproval(mForApproval, pending[0]?.summary || "")).catch(() => {});
       return true;
     }
     await executeCall(id, call, true);
@@ -417,6 +422,8 @@ async function finalize(id: string, candidate: string) {
   await clearApi(id);
   await releaseLease(id);
   await logStatus(id, "Completed");
+  // Feed the activity feed + advance the linked CRM lead through the pipeline.
+  { const done = await getMission(id); if (done) import("@/lib/server/missionHooks").then((h) => h.onMissionCompleted(done)).catch(() => {}); }
 
   // Recurring missions queue their next run — but re-read first, so a mission
   // canceled mid-run (recurrence cleared) does NOT spawn another occurrence.
@@ -509,6 +516,7 @@ export async function runMission(id: string) {
       await clearApi(id);
       await releaseLease(id);
       await logStatus(id, "Failed", `${attempts} attempts exhausted`);
+      { const failed = await getMission(id); if (failed) import("@/lib/server/missionHooks").then((h) => h.onMissionFailed(failed)).catch(() => {}); }
     }
   }
 }

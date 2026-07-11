@@ -1,9 +1,10 @@
 import { read, mutate, uid } from "@/lib/server/db";
 import type {
   Brand, BrandColors, AppSettings, OnboardingForm, OnboardingField, FormSubmission,
-  LeadSource, Contact, LeadStatus,
+  LeadSource, Contact, LeadStatus, PipelineStage, BrandEmailConfig, BrandCalendarConfig,
+  BrandNotificationSettings, EmailTemplate,
 } from "@/lib/types";
-import { LEAD_SOURCES } from "@/lib/types";
+import { LEAD_SOURCES, DEFAULT_PIPELINE_STAGES } from "@/lib/types";
 
 /**
  * Multi-brand service — UW Equity (parent) + its subsidiaries.
@@ -23,6 +24,28 @@ const DEFAULT_LEAD_SOURCES: LeadSource[] = ["website", "instagram", "referral", 
 
 /* ---------------- seeding ---------------- */
 
+function defaultNotifications(): BrandNotificationSettings {
+  return { newLead: true, missionComplete: true, blocker: true, dailyDigest: false };
+}
+function defaultEmailConfig(name: string): BrandEmailConfig {
+  return {
+    fromName: name,
+    signature: `— The ${name} Team`,
+    templates: [
+      { id: uid(), name: "Lead welcome", subject: `Welcome to ${name}`, body: `Hi {{name}},\n\nThanks for reaching out to ${name}. We received your details and a team member will follow up shortly.\n` },
+      { id: uid(), name: "Follow-up", subject: `Following up — ${name}`, body: `Hi {{name}},\n\nJust checking in on your project with ${name}. Happy to answer any questions.\n` },
+    ],
+  };
+}
+const EVENT_TYPES: Record<string, string[]> = {
+  "Prism44": ["Discovery call", "Content review", "Internal meeting"],
+  "Quality Management": ["Property inspection", "Site visit", "Internal meeting"],
+  "UW Equity": ["Investor meeting", "Underwriting review", "Internal meeting"],
+};
+function defaultCalendarConfig(name: string): BrandCalendarConfig {
+  return { calendarId: undefined, eventTypes: EVENT_TYPES[name] || ["Discovery call", "Internal meeting"] };
+}
+
 /** The initial portfolio. UW Equity is the holding company; the rest are its
  *  subsidiaries. Future companies are added via the CRUD API — nothing here is
  *  hard-coded downstream. */
@@ -38,49 +61,128 @@ function seedBrands(): Brand[] {
     services: string[],
   ): Brand => ({
     id, name, slug: slugify(name), parentId: parent, isParent,
-    domain: "", logo: name.split(/\s+/).map((w) => w[0]).join("").slice(0, 3).toUpperCase(),
+    domain: "", website: "", logo: name.split(/\s+/).map((w) => w[0]).join("").slice(0, 3).toUpperCase(),
     instagramAccounts: [], emailAccounts: [], services,
     colors, leadSources: [...DEFAULT_LEAD_SOURCES], status: "active",
+    pipelineStages: [...DEFAULT_PIPELINE_STAGES],
+    email: defaultEmailConfig(name),
+    calendar: defaultCalendarConfig(name),
+    notifications: defaultNotifications(),
     createdAt: now, updatedAt: now,
   });
   return [
     mk(parentId, "UW Equity", null, true, { primary: "#6366f1", secondary: "#0ea5e9", accent: "#22d3ee" }, ["Holding company", "Capital allocation", "Portfolio operations"]),
-    mk(uid(), "Prism44", parentId, false, { primary: "#a855f7", secondary: "#ec4899", accent: "#f472b6" }, []),
-    mk(uid(), "Quality Management", parentId, false, { primary: "#10b981", secondary: "#14b8a6", accent: "#34d399" }, []),
+    mk(uid(), "Prism44", parentId, false, { primary: "#a855f7", secondary: "#ec4899", accent: "#f472b6" }, ["Content", "Branding", "Production"]),
+    mk(uid(), "Quality Management", parentId, false, { primary: "#10b981", secondary: "#14b8a6", accent: "#34d399" }, ["Property services", "Inspections", "Maintenance"]),
   ];
 }
 
-function defaultForm(brandId: string, brandName: string): OnboardingForm {
+const F = (label: string, type: OnboardingField["type"], required = false, mapsTo?: OnboardingField["mapsTo"], options?: string[]): OnboardingField =>
+  ({ id: uid(), label, type, required, mapsTo, options });
+
+/** Brand-specific example onboarding forms (Phase 2 #1 — the given examples). */
+function exampleForm(brandId: string, name: string): OnboardingForm {
   const now = Date.now();
-  const f = (label: string, type: OnboardingField["type"], required: boolean, mapsTo?: OnboardingField["mapsTo"], options?: string[]): OnboardingField =>
-    ({ id: uid(), label, type, required, mapsTo, options });
+  const base = { id: uid(), brandId, status: "active" as const, createdAt: now, updatedAt: now };
+  if (name === "Prism44") {
+    return {
+      ...base, title: "Prism44 — Project Intake", description: "Tell us about your brand and what you need created.",
+      fields: [
+        F("Full name", "text", true, "name"), F("Email", "email", true, "email"), F("Company", "text", false, "company"),
+        F("Social media / website", "url", false), F("Services requested", "multiselect", false, undefined, ["Content creation", "Branding", "Social media", "Video production", "Web design"]),
+        F("Budget", "number", false, "budget"), F("Timeline", "select", false, undefined, ["ASAP", "1–3 months", "3–6 months", "Flexible"]),
+        F("Inspiration / examples", "textarea", false, "notes"), F("Upload assets", "file", false),
+      ],
+    };
+  }
+  if (name === "Quality Management") {
+    return {
+      ...base, title: "Quality Management — Service Request", description: "Tell us about the property and the work needed.",
+      fields: [
+        F("Full name", "text", true, "name"), F("Email", "email", true, "email"), F("Property address", "text", false, "notes"),
+        F("Number of units", "number", false), F("Type of work", "multiselect", false, undefined, ["Renovation", "Inspection", "Maintenance", "Turnover", "Construction"]),
+        F("Photos / videos", "file", false), F("Timeline", "select", false, undefined, ["ASAP", "1–3 months", "Flexible"]),
+        F("Budget", "number", false, "budget"), F("Preferred inspection date", "date", false),
+      ],
+    };
+  }
+  if (name === "UW Equity") {
+    return {
+      ...base, title: "UW Equity — Investor Intake", description: "Tell us about your investment criteria.",
+      fields: [
+        F("Full name", "text", true, "name"), F("Email", "email", true, "email"), F("Entity / investor information", "text", false, "company"),
+        F("Acquisition criteria", "textarea", false), F("Capital available", "number", false, "budget"),
+        F("Market focus", "multiselect", false, undefined, ["Multifamily", "Retail", "Office", "Industrial", "Mixed-use"]),
+        F("Documents", "file", false), F("Notes", "textarea", false, "notes"),
+      ],
+    };
+  }
+  // Generic fallback for future brands.
   return {
-    id: uid(), brandId, title: `${brandName} — New Client Intake`,
-    description: `Tell us about your needs and the ${brandName} team will follow up.`,
+    ...base, title: `${name} — New Client Intake`, description: `Tell us about your needs and the ${name} team will follow up.`,
     fields: [
-      f("Full name", "text", true, "name"),
-      f("Email", "email", true, "email"),
-      f("Phone", "phone", false, "phone"),
-      f("What are you looking for?", "textarea", false, "notes"),
-      f("Budget", "number", false, "budget"),
-      f("How did you hear about us?", "select", false, undefined, ["Website", "Instagram", "Referral", "Ads", "Other"]),
+      F("Full name", "text", true, "name"), F("Email", "email", true, "email"), F("Phone", "phone", false, "phone"),
+      F("What are you looking for?", "textarea", false, "notes"), F("Budget", "number", false, "budget"),
+      F("How did you hear about us?", "select", false, undefined, ["Website", "Instagram", "Referral", "Ads", "Other"]),
     ],
-    status: "active", createdAt: now, updatedAt: now,
   };
 }
 
-/** Idempotently ensure the portfolio + default forms + active-brand setting exist. */
+const KNOWN_BRANDS = ["Prism44", "Quality Management", "UW Equity"];
+const RICH_TYPES = ["multiselect", "file", "url", "date"];
+
+/** Idempotently ensure the portfolio + example forms + active-brand setting exist. */
 export async function ensureBrandsSeeded(): Promise<void> {
   const need = await read((db) => (db.brands || []).length === 0);
-  if (!need) return;
+  if (need) {
+    await mutate((db) => {
+      if ((db.brands || []).length) return; // double-checked under the write lock
+      const brands = seedBrands();
+      db.brands = brands;
+      // Every brand (including the parent) gets its example onboarding form.
+      db.onboardingForms = [...(db.onboardingForms || []), ...brands.map((b) => exampleForm(b.id, b.name))];
+      const parent = brands.find((b) => b.isParent) || brands[0];
+      db.settings = { ...(db.settings || { activeBrandId: null }), activeBrandId: parent.id };
+    });
+  }
+  await ensureBrandsUpgraded();
+}
+
+/**
+ * Backfill Phase 2 operational config onto brands seeded by an earlier version
+ * (existing deployments): pipeline stages, email/calendar identity, notifications,
+ * and the richer brand-specific example onboarding forms. Idempotent — a no-op
+ * once every brand is upgraded, so it is safe to call on every read.
+ */
+async function ensureBrandsUpgraded(): Promise<void> {
+  const genericTitle = (name: string) => `${name} — New Client Intake`;
+  const hasGeneric = (forms: OnboardingForm[], brandId: string, name: string) =>
+    forms.some((f) => f.brandId === brandId && f.title === genericTitle(name));
+
+  const needsWork = await read((db) => {
+    const brands = db.brands || [];
+    if (brands.some((b) => !b.pipelineStages || !b.email || !b.calendar || !b.notifications)) return true;
+    // A known brand still carrying the OLD generic default form gets it swapped for the rich example.
+    return brands.some((b) => KNOWN_BRANDS.includes(b.name) && hasGeneric(db.onboardingForms || [], b.id, b.name));
+  });
+  if (!needsWork) return;
+
   await mutate((db) => {
-    if ((db.brands || []).length) return; // double-checked under the write lock
-    const brands = seedBrands();
-    db.brands = brands;
-    const subs = brands.filter((b) => !b.isParent);
-    db.onboardingForms = [...(db.onboardingForms || []), ...subs.map((b) => defaultForm(b.id, b.name))];
-    const parent = brands.find((b) => b.isParent) || brands[0];
-    db.settings = { ...(db.settings || { activeBrandId: null }), activeBrandId: parent.id };
+    for (const b of db.brands || []) {
+      if (!b.pipelineStages) b.pipelineStages = [...DEFAULT_PIPELINE_STAGES];
+      if (!b.email) b.email = defaultEmailConfig(b.name);
+      if (!b.calendar) b.calendar = defaultCalendarConfig(b.name);
+      if (!b.notifications) b.notifications = defaultNotifications();
+      if (b.website === undefined) b.website = "";
+    }
+    // Swap the stale auto-seeded generic intake form for the rich brand-specific
+    // example (safe — those were defaults, not user-authored). Deterministic by title.
+    for (const b of db.brands || []) {
+      if (!KNOWN_BRANDS.includes(b.name)) continue;
+      if (!hasGeneric(db.onboardingForms || [], b.id, b.name)) continue;
+      db.onboardingForms = (db.onboardingForms || []).filter((f) => !(f.brandId === b.id && f.title === genericTitle(b.name)));
+      db.onboardingForms = [exampleForm(b.id, b.name), ...(db.onboardingForms || [])]; // prepend so it is the brand's primary form
+    }
   });
 }
 
@@ -109,6 +211,7 @@ export async function createBrand(input: Partial<Brand>): Promise<Brand> {
       parentId: input.parentId !== undefined ? input.parentId : parent?.id ?? null,
       isParent: false,
       domain: input.domain ? String(input.domain).slice(0, 200) : "",
+      website: input.website ? String(input.website).slice(0, 300) : "",
       logo: input.logo ? String(input.logo).slice(0, 300) : String(input.name || "?").slice(0, 3).toUpperCase(),
       instagramAccounts: sanitizeList(input.instagramAccounts),
       emailAccounts: sanitizeList(input.emailAccounts),
@@ -116,6 +219,11 @@ export async function createBrand(input: Partial<Brand>): Promise<Brand> {
       colors: normalizeColors(input.colors),
       leadSources: sanitizeSources(input.leadSources),
       status: "active",
+      // Future companies get the same operational defaults as the seeded ones.
+      pipelineStages: normalizeStages(input.pipelineStages),
+      email: input.email ? normalizeEmailConfig(input.email, String(input.name || "Brand")) : defaultEmailConfig(String(input.name || "Brand")),
+      calendar: input.calendar ? normalizeCalendarConfig(input.calendar) : defaultCalendarConfig(String(input.name || "Brand")),
+      notifications: input.notifications ? { ...defaultNotifications(), ...input.notifications } : defaultNotifications(),
       createdAt: now, updatedAt: now,
     };
     db.brands = [...(db.brands || []), brand];
@@ -123,7 +231,7 @@ export async function createBrand(input: Partial<Brand>): Promise<Brand> {
   return brand;
 }
 
-const BRAND_EDITABLE: (keyof Brand)[] = ["name", "domain", "logo", "instagramAccounts", "emailAccounts", "services", "colors", "leadSources", "status", "parentId"];
+const BRAND_EDITABLE: (keyof Brand)[] = ["name", "domain", "website", "logo", "instagramAccounts", "emailAccounts", "services", "colors", "leadSources", "status", "parentId", "pipelineStages", "email", "calendar", "notifications"];
 
 export async function patchBrand(id: string, input: Partial<Brand>): Promise<Brand | undefined> {
   await ensureBrandsSeeded();
@@ -135,6 +243,10 @@ export async function patchBrand(id: string, input: Partial<Brand>): Promise<Bra
       if (!(k in input)) continue;
       if (k === "instagramAccounts" || k === "emailAccounts" || k === "services") (b as any)[k] = sanitizeList((input as any)[k]);
       else if (k === "leadSources") b.leadSources = sanitizeSources(input.leadSources);
+      else if (k === "pipelineStages") b.pipelineStages = normalizeStages(input.pipelineStages);
+      else if (k === "email") b.email = normalizeEmailConfig(input.email, b.name);
+      else if (k === "calendar") b.calendar = normalizeCalendarConfig(input.calendar);
+      else if (k === "notifications") b.notifications = { ...defaultNotifications(), ...b.notifications, ...input.notifications };
       else if (k === "colors") b.colors = normalizeColors(input.colors);
       else if (k === "name") { b.name = String(input.name).slice(0, 120); b.slug = slugify(b.name); }
       else (b as any)[k] = (input as any)[k];
@@ -243,6 +355,7 @@ export async function submitForm(
   formId: string,
   data: Record<string, any>,
   leadSourceInput?: string,
+  campaign?: string,
 ): Promise<{ ok: boolean; error?: string; submissionId?: string; contactId?: string; brandId?: string }> {
   await ensureBrandsSeeded();
   let result: { ok: boolean; error?: string; submissionId?: string; contactId?: string; brandId?: string } = { ok: false, error: "not found" };
@@ -251,18 +364,21 @@ export async function submitForm(
     if (!form) { result = { ok: false, error: "form not found" }; return; }
     if (form.status !== "active") { result = { ok: false, error: "form is disabled" }; return; }
 
-    // Map answers → Contact fields via each field's `mapsTo`.
+    // Map answers → Contact fields via each field's `mapsTo`. Multi-value answers
+    // (multiselect) are joined; file answers keep their metadata as text.
     const mapped: Record<string, any> = {};
     for (const field of form.fields) {
-      const v = data[field.id] ?? data[field.label];
+      let v = data[field.id] ?? data[field.label];
       if (v == null || v === "") continue;
+      if (Array.isArray(v)) v = v.join(", ");
       if (field.mapsTo) mapped[field.mapsTo] = v;
     }
-    // Lead source: explicit param wins; otherwise infer from a "how did you hear" answer.
     const leadSource = coerceSource(leadSourceInput) || inferSource(data, form) || "website";
+    const camp = campaign ? String(campaign).slice(0, 120) : undefined;
 
     const now = Date.now();
     const contactId = uid();
+    const notesParts = [mapped.notes, mapped.company ? `Company: ${mapped.company}` : ""].filter(Boolean);
     const contact: Contact = {
       id: contactId,
       brandId: form.brandId,
@@ -273,14 +389,16 @@ export async function submitForm(
       status: "new" as LeadStatus,
       source: `onboarding:${form.title}`,
       leadSource,
+      campaign: camp,
+      company: mapped.company ? String(mapped.company).slice(0, 160) : undefined,
       budget: Number(mapped.budget) || 0,
-      notes: String(mapped.notes || "").slice(0, 2000),
+      notes: String(notesParts.join("\n")).slice(0, 2000),
       lastTouch: now, createdAt: now,
     };
     db.contacts = [contact, ...(db.contacts || [])];
 
     const submission: FormSubmission = {
-      id: uid(), formId, brandId: form.brandId, data, leadSource, contactId, createdAt: now,
+      id: uid(), formId, brandId: form.brandId, data, leadSource, campaign: camp, contactId, createdAt: now,
     };
     db.formSubmissions = [submission, ...(db.formSubmissions || [])].slice(0, SUBMISSION_CAP);
     result = { ok: true, submissionId: submission.id, contactId, brandId: form.brandId };
@@ -308,16 +426,56 @@ function normalizeColors(c: any): BrandColors {
 }
 function normalizeFields(fields: any): OnboardingField[] {
   if (!Array.isArray(fields)) return [];
-  const types = ["text", "email", "phone", "textarea", "select", "number"];
-  const maps = ["name", "email", "phone", "budget", "notes", "type"];
-  return fields.slice(0, 40).map((f: any) => ({
-    id: f?.id ? String(f.id) : uid(),
-    label: String(f?.label || "Field").slice(0, 160),
-    type: (types.includes(f?.type) ? f.type : "text") as OnboardingField["type"],
-    required: Boolean(f?.required),
-    options: Array.isArray(f?.options) ? f.options.map((o: any) => String(o).slice(0, 120)).slice(0, 30) : undefined,
-    mapsTo: maps.includes(f?.mapsTo) ? f.mapsTo : undefined,
-  }));
+  const types = ["text", "email", "phone", "textarea", "select", "multiselect", "file", "date", "url", "number"];
+  const maps = ["name", "email", "phone", "budget", "notes", "type", "company"];
+  return fields.slice(0, 60).map((f: any) => {
+    const showIf = f?.showIf && f.showIf.fieldId
+      ? { fieldId: String(f.showIf.fieldId), equals: String(f.showIf.equals ?? "") }
+      : undefined;
+    return {
+      id: f?.id ? String(f.id) : uid(),
+      label: String(f?.label || "Field").slice(0, 160),
+      type: (types.includes(f?.type) ? f.type : "text") as OnboardingField["type"],
+      required: Boolean(f?.required),
+      options: Array.isArray(f?.options) ? f.options.map((o: any) => String(o).slice(0, 120)).slice(0, 30) : undefined,
+      placeholder: f?.placeholder ? String(f.placeholder).slice(0, 160) : undefined,
+      mapsTo: maps.includes(f?.mapsTo) ? f.mapsTo : undefined,
+      showIf,
+    };
+  });
+}
+function normalizeStages(stages: any): PipelineStage[] {
+  if (!Array.isArray(stages) || !stages.length) return [...DEFAULT_PIPELINE_STAGES];
+  const out = stages.slice(0, 20).map((s: any) => {
+    const label = String(s?.label || s?.key || "Stage").slice(0, 60);
+    const key = String(s?.key || slugify(label) || uid()).slice(0, 40);
+    return { key, label };
+  }).filter((s: PipelineStage) => s.key && s.label);
+  return out.length ? out : [...DEFAULT_PIPELINE_STAGES];
+}
+function normalizeEmailConfig(c: any, brandName: string): BrandEmailConfig {
+  const base = defaultEmailConfig(brandName);
+  if (!c || typeof c !== "object") return base;
+  const templates: EmailTemplate[] = Array.isArray(c.templates)
+    ? c.templates.slice(0, 40).map((t: any) => ({
+        id: t?.id ? String(t.id) : uid(),
+        name: String(t?.name || "Template").slice(0, 120),
+        subject: String(t?.subject || "").slice(0, 240),
+        body: String(t?.body || "").slice(0, 6000),
+      }))
+    : base.templates;
+  return {
+    fromName: c.fromName ? String(c.fromName).slice(0, 120) : base.fromName,
+    connectedEmail: c.connectedEmail ? String(c.connectedEmail).slice(0, 200) : undefined,
+    signature: c.signature != null ? String(c.signature).slice(0, 1000) : base.signature,
+    templates,
+  };
+}
+function normalizeCalendarConfig(c: any): BrandCalendarConfig {
+  return {
+    calendarId: c?.calendarId ? String(c.calendarId).slice(0, 200) : undefined,
+    eventTypes: Array.isArray(c?.eventTypes) ? c.eventTypes.map((e: any) => String(e).slice(0, 80)).slice(0, 20) : [],
+  };
 }
 function coerceSource(s: any): LeadSource | null {
   if (!s) return null;

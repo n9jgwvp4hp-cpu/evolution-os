@@ -50,6 +50,8 @@ function initPg(): Promise<void> {
           worker_id TEXT,
           lease_expires BIGINT,
           objective_id TEXT,
+          brand_id TEXT,
+          contact_id TEXT,
           priority INT NOT NULL DEFAULT 0,
           created_at BIGINT NOT NULL,
           updated_at BIGINT NOT NULL
@@ -59,6 +61,8 @@ function initPg(): Promise<void> {
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS lease_expires BIGINT`);
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS objective_id TEXT`);
       await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0`);
+      await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS brand_id TEXT`);
+      await p.query(`ALTER TABLE missions ADD COLUMN IF NOT EXISTS contact_id TEXT`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_status_sched ON missions (status, scheduled_for)`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_created ON missions (created_at DESC)`);
       await p.query(`CREATE INDEX IF NOT EXISTS idx_missions_lease ON missions (status, lease_expires)`);
@@ -122,15 +126,15 @@ async function insertMissionTx(client: PoolClient, m: Mission): Promise<void> {
   await client.query(
     `INSERT INTO missions
        (id, objective, status, result, qc_left, attempts, acknowledged, pending,
-        pending_decision, scheduled_for, recurrence_every_ms, objective_id, priority, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        pending_decision, scheduled_for, recurrence_every_ms, objective_id, priority, brand_id, contact_id, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      ON CONFLICT (id) DO NOTHING`,
     [
       m.id, m.objective, m.status, m.result ?? null, m.qcLeft ?? 2, m.attempts ?? 0,
       Boolean(m.acknowledged), JSON.stringify(m.pending ?? []),
       m.pendingDecision === undefined ? null : m.pendingDecision,
       m.scheduledFor ?? null, m.recurrence?.everyMs ?? null, m.objectiveId ?? null,
-      m.priority ?? 0, m.createdAt, m.updatedAt,
+      m.priority ?? 0, m.brandId ?? null, m.contactId ?? null, m.createdAt, m.updatedAt,
     ]
   );
   for (const s of m.steps ?? []) {
@@ -162,6 +166,8 @@ function rowToMission(r: any, steps: MissionStep[], api: MissionApiMsg[]): Missi
     scheduledFor: r.scheduled_for != null ? Number(r.scheduled_for) : undefined,
     recurrence: r.recurrence_every_ms != null ? { everyMs: Number(r.recurrence_every_ms) } : undefined,
     objectiveId: r.objective_id ?? null,
+    brandId: r.brand_id ?? null,
+    contactId: r.contact_id ?? null,
     priority: r.priority != null ? Number(r.priority) : 0,
     workerId: r.worker_id ?? undefined,
     leaseExpires: r.lease_expires != null ? Number(r.lease_expires) : undefined,
@@ -187,6 +193,8 @@ const PATCH_COLS: Record<string, { col: string; val: (v: any) => any }> = {
   scheduledFor: { col: "scheduled_for", val: (v) => v ?? null },
   recurrence: { col: "recurrence_every_ms", val: (v) => v?.everyMs ?? null },
   objectiveId: { col: "objective_id", val: (v) => v ?? null },
+  brandId: { col: "brand_id", val: (v) => v ?? null },
+  contactId: { col: "contact_id", val: (v) => v ?? null },
   priority: { col: "priority", val: (v) => Math.round(Number(v) || 0) },
 };
 

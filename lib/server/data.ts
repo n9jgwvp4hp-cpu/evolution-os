@@ -186,6 +186,20 @@ export async function addContact(a: any) {
   return updated ? { ok: true, updated: name } : { ok: true, created: name };
 }
 
+/** Patch a lead's CRM/pipeline fields (stage, owner, nextAction, revenue, …). */
+export async function patchContact(id: string, p: Partial<Contact>): Promise<Contact | undefined> {
+  const editable = ["pipelineStage", "owner", "nextAction", "revenue", "status", "leadSource", "campaign", "lastContact", "notes", "budget", "brandId"] as const;
+  let out: Contact | undefined;
+  await mutate((db) => {
+    const c = (db.contacts || []).find((x) => x.id === id);
+    if (!c) return;
+    for (const k of editable) if (k in p) (c as any)[k] = (p as any)[k];
+    c.lastTouch = Date.now();
+    out = c;
+  });
+  return out;
+}
+
 export async function createDeal(a: any) {
   let linkedName: string | null = null;
   const deal: Deal = {
